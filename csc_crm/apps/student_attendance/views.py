@@ -1,4 +1,5 @@
 import json
+import csv
 from django.conf import settings
 from django.contrib import messages
 from django.core.mail import send_mail
@@ -22,6 +23,7 @@ from csc_crm.apps.student_attendance.forms import BatchForm
 from .filters import AttendanceFilter
 from .models import *
 from .serializers import *
+from django.core.paginator import Paginator
 from .services import (get_absent_tracker_data, get_low_attendance_data)
 from datetime import datetime
 from django.template.loader import render_to_string
@@ -45,6 +47,10 @@ from .attendance_utils import (
 from .pdf_utils import get_default_table_style
 from .excel_utils import ExcelStyles, STATUS_FILL_MAP, style_header_row
 from django.contrib.auth.decorators import login_required
+
+from csc_crm.apps.staff.models import TrainerSchedule, Staff
+from .forms import TrainerScheduleForm
+
 
 
 #===================================== BATCH CRUD API ====================================#
@@ -80,6 +86,156 @@ def get_course_duration(request, course_id):
     except Course.DoesNotExist:
         return JsonResponse({"error": "Course not found"}, status=404)
 
+
+#================ TRAINER SCHEDULE PAGE (CREATE FORM + HISTORY LIST, PAGINATED) ==================#
+@login_required(login_url='staff_login')
+def schedule_page(request):
+
+    my_staff = getattr(request.user, 'staff_profile', None)
+    my_role = my_staff.role.role_name if my_staff and my_staff.role else None
+
+    is_admin_or_manager = my_role in ['Admin', 'Manager']
+
+    # ---- List: trainer sees own only, admin/manager sees everyone's ----
+    if my_role == 'Trainer':
+        schedules_qs = TrainerSchedule.objects.filter(
+            staff=my_staff
+        ).select_related('staff').order_by('-date', '-time')
+    else:
+        schedules_qs = TrainerSchedule.objects.all(
+        ).select_related('staff').order_by('-date', '-time')
+
+    # ---- Pagination: 10 rows per page ----
+    paginator = Paginator(schedules_qs, 10)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    form = TrainerScheduleForm() if is_admin_or_manager else None
+
+    context = {
+        'form': form,
+        'schedules': page_obj,       # template loops over this
+        'page_obj': page_obj,        # used for pagination controls
+        'is_admin_or_manager': is_admin_or_manager,
+        'my_role': my_role,
+    }
+
+    return render(request, 'attendance/schedule_create.html', context)
+
+#================ CREATE SCHEDULE (ADMIN/MANAGER ONLY) ==================#
+@login_required(login_url='staff_login')
+@require_POST
+def create_schedule(request):
+
+    my_staff = getattr(request.user, 'staff_profile', None)
+    my_role = my_staff.role.role_name if my_staff and my_staff.role else None
+
+    if my_role not in ['Admin', 'Manager']:
+        messages.error(request, "You do not have permission to create a schedule.")
+        return redirect('schedule_page')
+
+    form = TrainerScheduleForm(request.POST)
+
+    if form.is_valid():
+        schedule = form.save()
+
+        messages.success(request, "Schedule created successfully.")
+        return redirect('overview', staff_id=schedule.staff.id)
+
+    else:
+        for field, errors in form.errors.items():
+            for error in errors:
+                messages.error(request, f"{field.replace('_', ' ').title()}: {error}")
+
+        return redirect('schedule_page')
+
+@login_required(login_url='staff_login')
+@require_POST
+def update_schedule_status(request, schedule_id):
+
+    my_staff = getattr(request.user, 'staff_profile', None)
+    my_role = my_staff.role.role_name if my_staff and my_staff.role else None
+
+    if my_role not in ['Admin', 'Manager', 'Trainer']:
+        return JsonResponse({'status': 'error', 'message': 'You do not have permission to update schedules.'}, status=403)
+
+    schedule = get_object_or_404(TrainerSchedule, id=schedule_id)
+
+    if my_role == 'Trainer' and schedule.staff_id != my_staff.id:
+        return JsonResponse({'status': 'error', 'message': 'You can only update your own schedule.'}, status=403)
+
+    try:
+        payload = json.loads(request.body or '{}')
+    except json.JSONDecodeError:
+        payload = {}
+
+    new_status = payload.get('status')
+
+    if new_status not in ('completed', 'blocked', 'upcoming'):
+        return JsonResponse({'status': 'error', 'message': 'Invalid status.'}, status=400)
+
+    # Trainer: one-way only, from 'upcoming' to completed/blocked. No reverting.
+    if my_role == 'Trainer':
+        if schedule.status != 'upcoming':
+            return JsonResponse({'status': 'error', 'message': 'This schedule has already been updated and cannot be changed.'}, status=403)
+        if new_status == 'upcoming':
+            return JsonResponse({'status': 'error', 'message': 'Invalid status change.'}, status=403)
+
+    schedule.status = new_status
+    schedule.save()
+
+    return JsonResponse({
+        'status': 'success',
+        'new_status': schedule.status,
+        'new_status_display': schedule.get_status_display(),
+    })
+    
+#================ SCHEDULE CSV EXPORT (SELECTED ROWS, ROLE-SCOPED) ==================#
+@login_required(login_url='staff_login')
+def export_schedule(request):
+
+    my_staff = getattr(request.user, 'staff_profile', None)
+    my_role = my_staff.role.role_name if my_staff and my_staff.role else None
+
+    if my_role == 'Trainer':
+        qs = TrainerSchedule.objects.filter(staff=my_staff)
+    else:
+        qs = TrainerSchedule.objects.all()
+
+    selected_ids = request.GET.get('ids', '')
+
+    if selected_ids:
+        id_list = [int(i) for i in selected_ids.split(',') if i.strip().isdigit()]
+        if id_list:
+            qs = qs.filter(id__in=id_list)
+
+    qs = qs.select_related('staff').order_by('-date', '-time')
+
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="trainer_schedule.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow(['TRAINING SCHEDULE'])
+
+    if my_role == 'Trainer':
+        writer.writerow(['Date', 'Time', 'Class/Meeting', 'Topic', 'Status'])
+    else:
+        writer.writerow(['Trainer', 'Date', 'Time', 'Class/Meeting', 'Topic', 'Status'])
+
+    for schedule in qs:
+        row = [
+            schedule.date.strftime('%d-%m-%Y'),
+            schedule.time.strftime('%I:%M %p'),
+            schedule.get_type_display(),
+            schedule.topic,
+            schedule.get_status_display(),
+        ]
+
+        if my_role != 'Trainer':
+            row.insert(0, schedule.staff.full_name())
+
+        writer.writerow(row)
+
+    return response
 #=============================== DASHBOARD (JSON REFRESH) =======================================#
 @login_required(login_url='staff_login')
 def dashboard_api(request):
@@ -344,34 +500,34 @@ def batch_preview(request, batch_id):
 #===================================== MARK ATTENDANCE PAGE ======================================#
 @login_required(login_url='staff_login')
 def mark_attendance_page(request, batch_id):
-
+ 
     my_staff = getattr(request.user, 'staff_profile', None)
     my_role = my_staff.role.role_name if my_staff and my_staff.role else None
-
+ 
     batch = get_object_or_404(Batch, id=batch_id)
-
+ 
     if my_role == 'Trainer' and batch.trainer_id != my_staff.id:
         messages.error(request, "You are not assigned to this batch.")
         return redirect('staff_dashboard')
-
-    enrollments = Enrollment.objects.filter(batch=batch, admission__course_name=batch.course,)
-
+ 
+    enrollments = Enrollment.objects.filter(batch=batch, admission__course_name=batch.course, admission__status='enrolled')
+ 
     attendance_records = Attendance.objects.filter(batch=batch, attendance_date=timezone.now().date())
-
+ 
     syllabus_log = SyllabusLog.objects.filter(batch=batch, date=timezone.now().date()).first()
-
+ 
     duration = syllabus_log.duration if syllabus_log else 0
-
+ 
     attendance_map = {
         att.enrollment_id: att.status
         for att in attendance_records
     }
-
+ 
     remarks_map = {
         att.enrollment_id: att.remarks
         for att in attendance_records
     }
-
+ 
     context = {
         'batch': batch,
         'enrollments': enrollments,
@@ -381,8 +537,9 @@ def mark_attendance_page(request, batch_id):
         "duration_hours": duration // 60,
         "duration_minutes": duration % 60,
     }
-
+ 
     return render(request, 'attendance/mark_attendance.html', context)
+
 
 #=================================== SAVE BULK ATTENDANCE (API) ====================================#
 @api_view(['POST'])
@@ -469,7 +626,6 @@ def attendance_history_page(request):
 
     records = Attendance.objects.select_related('enrollment', 'batch').order_by('-attendance_date')
 
-    # Trainer -> only own assigned batches
     if my_role == 'Trainer':
         records = records.filter(batch__trainer=my_staff)
 
@@ -477,13 +633,22 @@ def attendance_history_page(request):
 
     attendance_filter = AttendanceFilter(request.GET, queryset=records)
 
-    # ---- Restrict batch dropdown to trainer's own batches ----
     if my_role == 'Trainer':
         attendance_filter.form.fields['batch'].queryset = Batch.objects.filter(trainer=my_staff)
 
     filtered_records = attendance_filter.qs
 
-    total_records = filtered_records.count()
+    try:
+        per_page = int(request.GET.get('per_page', 10))
+        if per_page not in (10, 25, 50):
+            per_page = 10
+    except (TypeError, ValueError):
+        per_page = 10
+
+    paginator = Paginator(filtered_records, per_page)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    total_records = paginator.count
     present = filtered_records.filter(status__in=["Present", "Late"]).count()
 
     counts = count_by_status(filtered_records)
@@ -496,9 +661,16 @@ def attendance_history_page(request):
         2
     ) if total_records else 0
 
+    querydict = request.GET.copy()
+    querydict.pop('page', None)
+    base_query = querydict.urlencode()
+
     context = {
         "filter": attendance_filter,
-        "records": filtered_records,
+        "records": page_obj,
+        "page_obj": page_obj,
+        "per_page": per_page,
+        "base_query": base_query,
         "courses": courses,
         "present": present,
         "total_records": total_records,
@@ -507,6 +679,22 @@ def attendance_history_page(request):
         "total_late": total_late,
         "avg_attendance": avg_attendance,
     }
+
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        table_html = render_to_string(
+            'attendance/_attendance_table_rows.html',
+            context,
+            request=request
+        )
+        pagination_html = render_to_string(
+            'attendance/_attendance_pagination.html',
+            context,
+            request=request
+        )
+        return JsonResponse({
+            'table_html': table_html,
+            'pagination_html': pagination_html,
+        })
 
     return render(request, 'attendance/attendance_history.html', context)
 
@@ -754,10 +942,12 @@ def absent_tracker(request):
     return render(request, 'attendance/absent_tracker.html', context)
 
 #=========================== ABSENT TRACKER - NOTIFICATION STATUS ================================#
-def mark_notification_sent(enrollment_id):
+def mark_notification_sent(request, enrollment_id):
 
-    tracker = AbsentTracker.objects.get_or_create(enrollment_id=enrollment_id)
-
+    tracker, created = AbsentTracker.objects.get_or_create(
+        enrollment_id=enrollment_id
+    )
+    
     tracker.notification_sent = True
     tracker.notification_status = "Dispatched"
     tracker.last_notified_at = timezone.now()
@@ -766,7 +956,7 @@ def mark_notification_sent(enrollment_id):
     return JsonResponse({"status": "success"})
 
 #================================== ABSENT TRACKER - ADMIN NOTES ====================================#
-def get_admin_notes(tracker_id):
+def get_admin_notes(request, tracker_id):
 
     tracker = AbsentTracker.objects.filter(
         id=tracker_id
@@ -953,32 +1143,80 @@ def low_attendance_export(request):
     return response
 
 #============================= NOTIFICATIONS - SINGLE STUDENT (EMAIL) ============================#
+@login_required(login_url='staff_login')
 def send_low_attendance_email(request, enrollment_id):
+    try:
+        enrollment = get_object_or_404(
+            Enrollment,
+            id=enrollment_id
+        )
 
-    enrollment = get_object_or_404(Enrollment, id=enrollment_id)
-    student = enrollment.student
+        student = enrollment.student
 
-    attendance_percentage = get_student_attendance_percentage(enrollment)
-    subject, message = build_attendance_email(student, attendance_percentage)
+        # Check student email
+        if not student.email:
+            return JsonResponse({
+                "status": "error",
+                "message": "Student email address is not available."
+            }, status=400)
 
-    send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [student.email], fail_silently=False)
+        attendance_percentage = get_student_attendance_percentage(
+            enrollment
+        )
 
-    messages.success(request, f"Email sent to {student.email}")
+        subject, message = build_attendance_email(
+            student,
+            attendance_percentage
+        )
 
-    return JsonResponse({"status": "success", "message": "📧 Email sent successfully"})
+        send_mail(
+            subject,
+            message,
+            settings.DEFAULT_FROM_EMAIL,
+            [student.email],
+            fail_silently=False
+        )
 
+        return JsonResponse({
+            "status": "success",
+            "message": f"Email sent successfully to {student.email}"
+        })
+
+    except Exception as e:
+        return JsonResponse({
+            "status": "error",
+            "message": "Notification Sending Failed",
+            "error": str(e)
+        }, status=500)
 #============================ NOTIFICATIONS - SINGLE STUDENT (SMS) ================================#
+@login_required(login_url='staff_login')
 def send_sms_notification(request, enrollment_id):
+    try:
+        enrollment = get_object_or_404(Enrollment, id=enrollment_id)
+        student = enrollment.student
 
-    enrollment = get_object_or_404(Enrollment, id=enrollment_id)
-    student = enrollment.student
+        phone_number = getattr(student, 'phone_no', None)
 
-    attendance_percentage = get_student_attendance_percentage(enrollment)
-    sms_message = build_attendance_sms(student, attendance_percentage)
+        if not phone_number:
+            return JsonResponse({
+                "status": "error",
+                "message": "Student phone number is not available."
+            }, status=400)
 
-    messages.success(request, f"SMS sent to {student.phone_no}")
+        attendance_percentage = get_student_attendance_percentage(enrollment)
+        build_attendance_sms(student, attendance_percentage)
 
-    return JsonResponse({"status": "success", "message": "📱 SMS sent successfully"})
+        return JsonResponse({
+            "status": "success",
+            "message": f"📱 SMS sent successfully to {phone_number}"
+        })
+
+    except Exception as e:
+        return JsonResponse({
+            "status": "error",
+            "message": "Notification Sending Failed",
+            "error": str(e)
+        }, status=500)
 
 #===================== NOTIFICATIONS - BULK (SELECTED STUDENTS) ========================#
 @require_POST
@@ -1027,7 +1265,8 @@ def send_bulk_notification(request):
     return JsonResponse({"status": "success", "message": f"✅ {label} sent to {sent_count} student(s)"})
 
 #====================== NOTIFICATIONS - EMAIL ALL LOW ATTENDANCE STUDENTS =======================#
-def send_email_all():
+@login_required(login_url='staff_login')
+def send_email_all(request):
 
     low_attendance_students = (get_low_attendance_data())
 
@@ -1400,13 +1639,25 @@ def reports(request):
     if course_filter:
         monthly_chart_title = f"Monthly Attendance Chart - {course_filter.title()}"
 
-    is_filtered = bool(course_filter or batch_filter or student_name or status_filter or attendance_filter)
+
+    is_filtered = bool(
+    course_filter
+        or batch_filter
+        or student_name
+        or status_filter
+        or attendance_filter
+        or date_from_filter
+        or date_to_filter
+        or distribution_percentage_filter
+    )
+
     total_attendance = sum(batch_present_list) + sum(batch_absent_list) + sum(batch_late_list)
 
     show_batch_chart = True
     if is_filtered and (course_filter or batch_filter):
         show_batch_chart = total_attendance > 0
-
+        
+            
     warning_message = ""
     if not show_batch_chart:
         if batch_filter:
@@ -1571,6 +1822,80 @@ def reports(request):
         })
 
     return render(request, "attendance/reports.html", context)
+
+def get_filtered_report_students(request, my_staff=None, my_role=None):
+    student_name = request.GET.get("student_name")
+    attendance_filter = request.GET.get("attendance")
+    course_filter = request.GET.get("course")
+    batch_filter = request.GET.get("batch")
+    status_filter = request.GET.get("status")
+    date_from_filter = request.GET.get("date_from")
+    date_to_filter = request.GET.get("date_to")
+
+    enrollments = Enrollment.objects.select_related(
+        'admission__student',
+        'admission__course_name',
+        'batch'
+    )
+
+    if my_role == 'Trainer':
+        enrollments = enrollments.filter(batch__trainer=my_staff)
+
+    if course_filter:
+        enrollments = enrollments.filter(
+            admission__course_name__course_name__iexact=course_filter
+        )
+
+    if batch_filter:
+        enrollments = enrollments.filter(batch_id=batch_filter)
+
+    if student_name:
+        enrollments = enrollments.filter(
+            admission__student__first_name__istartswith=student_name
+        )
+
+    report_students = []
+
+    for enrollment in enrollments:
+        present_count, absent_count, late_count, total_days = get_attendance_counts(
+            enrollment,
+            date_from_filter,
+            date_to_filter
+        )
+
+        if total_days == 0:
+            continue
+
+        status, attendance_rate = get_attendance_status(
+            present_count,
+            absent_count,
+            late_count,
+            total_days
+        )
+
+        if attendance_filter:
+            if round(attendance_rate, 1) != round(float(attendance_filter), 1):
+                continue
+
+        if status_filter:
+            if status.lower() != status_filter.lower():
+                continue
+
+        report_students.append({
+            "enrollment_id": enrollment.id,
+            "student": enrollment.admission.student,
+            "course": enrollment.admission.course_name,
+            "batch": enrollment.batch,
+            "present_count": present_count,
+            "absent_count": absent_count,
+            "late_count": late_count,
+            "attendance_rate": attendance_rate,
+            "status": status,
+            "total_days": total_days,
+        })
+
+    return report_students
+
 #============================= ANALYTICS EXPORT - PDF =====================================#
 @login_required(login_url='staff_login')
 def analytics_pdf(request):
@@ -1644,7 +1969,11 @@ def analytics_pdf(request):
 
     elements.append(Paragraph("Attendance Summary", styles['Heading2']))
 
-    report_students = get_report_students(my_staff=my_staff, my_role=my_role)
+    report_students = get_filtered_report_students(
+        request,
+        my_staff=my_staff,
+        my_role=my_role
+    )
     counts = get_status_summary_counts(report_students)
 
     attendance_summary = [
@@ -1758,7 +2087,11 @@ def analytics_excel(request):
             cell.alignment = ExcelStyles.center
         data_row += 1
 
-    report_students = get_report_students(my_staff=my_staff, my_role=my_role)
+    report_students = get_filtered_report_students(
+        request,
+        my_staff=my_staff,
+        my_role=my_role
+    )
     counts = get_status_summary_counts(report_students)
 
     status_row = data_row + 2
@@ -1814,7 +2147,11 @@ def report_pdf(request):
     my_staff = getattr(request.user, 'staff_profile', None)
     my_role = my_staff.role.role_name if my_staff and my_staff.role else None
 
-    students = get_report_students(my_staff=my_staff, my_role=my_role)
+    students = get_filtered_report_students(
+        request,
+        my_staff=my_staff,
+        my_role=my_role
+    )
 
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = 'attachment; filename=attendance_report.pdf'
@@ -1880,7 +2217,11 @@ def report_excel(request):
     my_staff = getattr(request.user, 'staff_profile', None)
     my_role = my_staff.role.role_name if my_staff and my_staff.role else None
 
-    students = get_report_students(my_staff=my_staff, my_role=my_role)
+    students = get_filtered_report_students(
+        request,
+        my_staff=my_staff,
+        my_role=my_role
+    )
 
     wb = Workbook()
     ws = wb.active

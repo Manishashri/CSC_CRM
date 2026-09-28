@@ -698,7 +698,7 @@ function validateFiltersClientSide() {
     const errors = [];
 
     const studentName = document.getElementById("studentNameFilter").value.trim();
-    const course = document.getElementById("courseFilter").value;
+    const course = document.getElementById("courseFilter") ? document.getElementById("courseFilter").value : "";
     const batch = document.getElementById("batchFilter").value;
     const status = document.getElementById("statusFilter").value;
     const dateFrom = document.getElementById("dateFromFilter").value;
@@ -739,9 +739,11 @@ function validateFiltersClientSide() {
 //================ BUILD QUERY PARAMS FROM FILTER FIELDS ==================//
 function buildFilterParams() {
 
+    const courseFilterEl = document.getElementById("courseFilter");
+
     const params = {
         student_name: document.getElementById("studentNameFilter").value,
-        course: document.getElementById("courseFilter").value,
+        course: courseFilterEl ? courseFilterEl.value : "",
         batch: document.getElementById("batchFilter").value,
         status: document.getElementById("statusFilter").value,
         attendance: document.getElementById("attendanceFilter").value,
@@ -761,6 +763,27 @@ function buildFilterParams() {
 
     return query;
 }
+
+function buildExportUrl(baseUrl) {
+    const query = buildFilterParams();
+    const queryString = query.toString();
+
+    if (queryString) {
+        return `${baseUrl}?${queryString}`;
+    }
+
+    return baseUrl;
+}
+
+document.querySelectorAll(".export-btn").forEach(button => {
+    button.addEventListener("click", function (event) {
+        event.preventDefault();
+
+        const exportUrl = buildExportUrl(this.href);
+
+        window.location.href = exportUrl;
+    });
+});
 
 //================ APPLY FILTER BUTTON LOADING STATE ==================//
 function setLoadingState(isLoading) {
@@ -886,7 +909,12 @@ document.getElementById(
     function () {
 
         document.getElementById("studentNameFilter").value = "";
-        document.getElementById("courseFilter").value = "";
+
+        const courseFilterEl = document.getElementById("courseFilter");
+        if (courseFilterEl) {
+            courseFilterEl.value = "";
+        }
+
         document.getElementById("batchFilter").value = "";
         document.getElementById("statusFilter").value = "";
         document.getElementById("attendanceFilter").value = "";

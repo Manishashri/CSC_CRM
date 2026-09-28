@@ -615,7 +615,6 @@ def call_history(request):
     })
 
 # ============================= LEAD CAPTURE TARGET (MARKETING) =============================
-# ============================= LEAD CAPTURE TARGET (MARKETING) =============================
 
 def is_target_assigner(user):
     """
@@ -638,6 +637,33 @@ def is_target_assigner(user):
         'Manager',
         'Marketing Lead',
     ]
+
+
+# ==========================================================
+# PERMISSION HELPER
+# ADMIN -> ANY TARGET
+# LEAD  -> ONLY TARGETS ASSIGNED BY THEM
+# ==========================================================
+
+def can_manage_target(request, target):
+
+    staff = getattr(
+        request.user,
+        'staff_profile',
+        None
+    )
+
+    # Admin: full access
+    if request.user.is_superuser:
+        return True
+
+    if staff and staff.role and staff.role.role_name.strip() == "Admin":
+        return True
+
+    # Lead: only the targets they assigned
+    return bool(
+        staff and target.assigned_by_id == staff.id
+    )
 
 
 @role_required(MARKETING_TARGET_ROLES, marketing_only=True)
@@ -758,28 +784,17 @@ def lead_capture_target(request):
 
     # ==========================================================
     # EDIT / DELETE PERMISSION
-    # ONLY THE PERSON WHO ASSIGNED THE TARGET
-    # CAN EDIT / DELETE IT
+    # ADMIN -> ANY TARGET
+    # LEAD  -> ONLY TARGETS ASSIGNED BY THEM
+    # COMPLETED TARGET -> BOTH BUTTONS DISABLED
     # ==========================================================
 
     for target in targets:
 
-        is_assigned_by_me = (
-            target.assigned_by_id == staff.id
-        )
+        can_manage = can_manage_target(request, target)
 
-        target.can_edit = is_assigned_by_me
-        target.can_delete = is_assigned_by_me
-
-        # Completed target → disable both buttons
-        if target.is_completed:
-            target.can_edit = False
-            target.can_delete = False
-
-        # Active target → only assigner can edit/delete
-        else:
-            target.can_edit = is_assigned_by_me
-            target.can_delete = is_assigned_by_me
+        target.can_edit = can_manage and not target.is_completed
+        target.can_delete = can_manage and not target.is_completed
 
     # ==========================================================
     # STATUS COUNTS
@@ -860,10 +875,7 @@ def lead_capture_target_assign(request):
     # ==========================================
 
     if not is_target_assigner(request.user):
-        messages.error(
-            request,
-            'You do not have permission to assign lead capture targets.'
-        )
+        messages.error(request, 'You do not have permission to assign lead capture targets.')
         return redirect('leads:lead_capture_target')
 
     if request.method == 'POST':
@@ -942,10 +954,10 @@ def lead_capture_target_assign(request):
 
 # ==========================================================
 # UPDATE TARGET
-# ONLY ASSIGNER CAN EDIT
+# ADMIN: ANY TARGET | LEAD: ONLY TARGETS ASSIGNED BY THEM
 # ==========================================================
 
-@role_required(MARKETING_LEAD_ROLES, marketing_only=True)
+@role_required(MARKETING_TARGET_ROLES, marketing_only=True)
 @require_http_methods(['POST'])
 def lead_capture_target_update(request, pk):
 
@@ -954,17 +966,11 @@ def lead_capture_target_update(request, pk):
         pk=pk
     )
 
-    staff = getattr(
-        request.user,
-        'staff_profile',
-        None
-    )
-
     # ==========================================
-    # ONLY THE ASSIGNER CAN EDIT
+    # PERMISSION CHECK
     # ==========================================
 
-    if not staff or target.assigned_by_id != staff.id:
+    if not can_manage_target(request, target):
 
         messages.error(
             request,
@@ -1013,10 +1019,10 @@ def lead_capture_target_update(request, pk):
 
 # ==========================================================
 # DELETE TARGET
-# ONLY ASSIGNER CAN DELETE
+# ADMIN: ANY TARGET | LEAD: ONLY TARGETS ASSIGNED BY THEM
 # ==========================================================
 
-@role_required(MARKETING_LEAD_ROLES, marketing_only=True)
+@role_required(MARKETING_TARGET_ROLES, marketing_only=True)
 @require_http_methods(['POST'])
 def lead_capture_target_delete(request, pk):
 
@@ -1025,17 +1031,11 @@ def lead_capture_target_delete(request, pk):
         pk=pk
     )
 
-    staff = getattr(
-        request.user,
-        'staff_profile',
-        None
-    )
-
     # ==========================================
-    # ONLY THE ASSIGNER CAN DELETE
+    # PERMISSION CHECK
     # ==========================================
 
-    if not staff or target.assigned_by_id != staff.id:
+    if not can_manage_target(request, target):
 
         messages.error(
             request,
@@ -1063,6 +1063,11 @@ def lead_capture_target_delete(request, pk):
     return redirect(
         'leads:lead_capture_target'
     )
+
+
+# ==========================================================
+# UPDATE PROGRESS (SELF REPORT)
+# ==========================================================
 
 @require_http_methods(['POST'])
 def lead_capture_target_progress(request, pk):
@@ -1116,6 +1121,7 @@ def lead_capture_target_progress(request, pk):
                 messages.error(request, f'{field}: {error}')
 
     return redirect('leads:lead_capture_target')
+
 
 # ============================= MY LEAD CAPTURE TARGET (SELF VIEW) =============================
 @login_required

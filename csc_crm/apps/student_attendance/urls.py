@@ -53,6 +53,13 @@ urlpatterns = [
     path('report-pdf/',views.report_pdf,name='report_pdf'),
     path('report-excel/',views.report_excel,name='report_excel'),
 
+    #================ Trainer-Schedule ==================#
+    path('schedule/', views.schedule_page, name='schedule_page'),
+    path('schedule/create/', views.create_schedule, name='create_schedule'),
+   
+    path('schedule/export/', views.export_schedule, name='export_schedule'),
+    path('schedule/status/<int:schedule_id>/', views.update_schedule_status, name='update_schedule_status'),
+
     #================ BATCH CRUD API (ROUTER) ==================#
     path('',include(router.urls)),
 ]

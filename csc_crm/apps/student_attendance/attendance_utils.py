@@ -16,7 +16,7 @@ def get_attendance_status(present_count, absent_count, late_count, total_days):
         return None, 0
 
     effective_present = present_count + late_count
-    attendance_rate = round((effective_present / total_days) * 100, 1)
+    attendance_rate = round((effective_present / total_days) * 100, 3)
 
     if attendance_rate >= 100:
         status = "Excellent"
@@ -129,13 +129,20 @@ def get_status_summary_counts(report_students):
     return counts
 
 #======================== BATCH ANALYTICS TABLE ROWS (PDF/EXCEL EXPORT) =========================#
-def get_batch_analytics_rows():
+
+def get_batch_analytics_rows(my_staff=None, my_role=None):
     """
     Returns list of rows: [course_name, batch_name, students, total_days, present, absent, late, "xx.x%"]
     Used by both analytics_pdf and analytics_excel to avoid duplicating the batch loop.
     """
     rows = []
-    for batch in Batch.objects.all():
+
+    batches = Batch.objects.all()
+
+    if my_role == 'Trainer' and my_staff:
+        batches = batches.filter(trainer=my_staff)
+
+    for batch in batches:
         stats = compute_batch_stats(batch)
         students = Enrollment.objects.filter(batch=batch).count()
         rows.append([

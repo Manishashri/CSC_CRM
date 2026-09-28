@@ -708,7 +708,7 @@ def edit_student(request, id):
 
         messages.success(
             request,
-            "✅ Student details updated successfully"
+            " Student details updated successfully"
         )
 
         return redirect('student_list')
@@ -731,7 +731,7 @@ def delete_student(request, id):
     student_obj = get_object_or_404(Student, id=id)
     student_obj.delete()
 
-    messages.success(request, "✅ Student deleted successfully")
+    messages.success(request, "Student deleted successfully")
 
     return redirect('student_list')
 

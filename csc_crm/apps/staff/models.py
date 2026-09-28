@@ -350,6 +350,7 @@ class TrainerSchedule(models.Model):
     STATUS_CHOICES = (
         ('upcoming', 'Upcoming'),
         ('completed', 'Completed'),
+        ('blocked', 'Blocked'),
     )
 
     staff = models.ForeignKey(
@@ -376,7 +377,7 @@ class TrainerSchedule(models.Model):
 
     class Meta:
         db_table = "trainer_schedule"
-        ordering = ['date', 'time']
+        ordering = ['-date', '-time']
 
     def __str__(self):
         return f"{self.staff.full_name()} - {self.topic}"

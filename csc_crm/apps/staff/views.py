@@ -6,7 +6,7 @@ from django.contrib import messages
 from django.utils import timezone
 from django.db.models.functions import TruncMonth
 from django.db.models import Q, Avg, Count, F, FloatField, ExpressionWrapper
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
 
@@ -146,8 +146,10 @@ def staff_management(request):
     allowed_roles = [
     'Admin',
     'Manager',
+    'HR',
     'Sales Exec Lead',
     'Marketing Lead',
+    'Developer',
 ]
 
     if my_role not in allowed_roles:
@@ -686,27 +688,6 @@ def overview(request, staff_id=None):
     week_data_this = [week_amounts.get(i, 0) for i in range(1, 6)]
     completed_amount = sum(week_data_this)
 
-    # === TRAINER SCHEDULE (POST) ===
-    if request.method == "POST" and "topic" in request.POST:
-        date = request.POST.get("date")
-        schedule_time = request.POST.get("time")
-        schedule_type = request.POST.get("type")
-        topic = request.POST.get("topic")
-        status = request.POST.get("status", "upcoming")
-
-        if all([date, schedule_time, schedule_type, topic]):
-            TrainerSchedule.objects.create(
-                staff=staff,
-                date=date,
-                time=schedule_time,
-                type=schedule_type,
-                topic=topic,
-                status=status
-            )
-            messages.success(request, "Trainer schedule added successfully.")
-
-        return redirect("overview", staff_id=staff.id)
-
     # === KPI: LEADS ===
     leads = LeadCapture.objects.filter(assigned_to=staff)
     assigned_leads = leads.count()
@@ -983,6 +964,19 @@ def attendance_page(request, id):
 
     auto_checkout_pending_attendance()
     staff = get_object_or_404(Staff, id=id)
+
+    # ================= ACCESS CONTROL =================
+    my_staff = getattr(request.user, 'staff_profile', None)
+
+    if (
+        my_staff
+        and my_staff.role
+        and my_staff.role.role_name not in ["Admin", "Manager", "HR"]
+        and staff.id != my_staff.id
+    ):
+        return HttpResponseForbidden(
+            "You do not have permission to access this Staff Attendance."
+        )
     
     if staff.role.role_name == "Admin":
         messages.error(request, "Attendance is not applicable for Admin.")
@@ -1164,13 +1158,16 @@ def staff_checkin(request, id):
 
     if request.method == 'POST':
 
+        # every redirect goes to the dashboard, where the toast is shown
+        back_to_checkin = redirect('staff_dashboard')
+
         if staff.date_of_joining > today:
             messages.error(request, "Attendance cannot be marked before joining date.")
-            return redirect('staff_dashboard')
+            return back_to_checkin
 
         if staff.role.role_name == "Admin":
             messages.error(request, "Attendance is not applicable for Admin.")
-            return redirect('staff_dashboard')
+            return back_to_checkin
 
         action = request.POST.get('action')
         current_time = timezone.localtime(timezone.now())
@@ -1183,11 +1180,11 @@ def staff_checkin(request, id):
         if action == 'checkin':
             if current_time.time() >= time(19, 0):
                 messages.error(request, "Check-In is not allowed after 7:00 PM.")
-                return redirect('staff_dashboard')
+                return back_to_checkin
 
             if attendance.log_in:
-                messages.error(request, "You have already checked in today.")
-                return redirect('staff_dashboard')
+                messages.warning(request, "You have already checked in today.")
+                return back_to_checkin
 
             attendance.log_in = current_time
             attendance.log_out = None
@@ -1195,20 +1192,24 @@ def staff_checkin(request, id):
             office_time = datetime.strptime("09:15", "%H:%M").time()
             attendance.status = 'Late' if current_time.time() > office_time else 'Present'
             attendance.save()
-            messages.success(request, "Check-In completed successfully.")
+
+            if attendance.status == 'Late':
+                messages.warning(request, "Checked in, but you are marked Late today.")
+            else:
+                messages.success(request, "Check-In completed successfully.")
 
         elif action == 'checkout':
             if not attendance.log_in:
-                messages.error(request, "Please check in first before checking out.")
-                return redirect('staff_dashboard')
+                messages.warning(request, "Please check in first before checking out.")
+                return back_to_checkin
 
             if attendance.log_out:
-                messages.error(request, "You have already checked out today.")
-                return redirect('staff_dashboard')
+                messages.warning(request, "You have already checked out today.")
+                return back_to_checkin
 
             if current_time.time() >= time(19, 0):
                 messages.error(request, "Checkout is allowed only until 7:00 PM.")
-                return redirect('staff_dashboard')
+                return back_to_checkin
 
             attendance.log_out = current_time
             worked_time = attendance.log_out - attendance.log_in
@@ -1217,7 +1218,11 @@ def staff_checkin(request, id):
             if worked_hours < 4:
                 attendance.status = 'Absent'
             attendance.save()
-            messages.success(request, "Check-Out completed successfully.")
+
+            if worked_hours < 4:
+                messages.warning(request, "Checked out, but worked less than 4 hours. Marked Absent.")
+            else:
+                messages.success(request, "Check-Out completed successfully.")
 
         elif action == 'leave':
             attendance.status = 'Leave'
@@ -1225,7 +1230,7 @@ def staff_checkin(request, id):
             attendance.log_out = None
             attendance.total_hours = None
             attendance.save()
-            messages.success(request, "Leave marked successfully.")
+            messages.warning(request, "Leave marked successfully.")
 
         elif action == 'absent':
             attendance.status = 'Absent'
@@ -1233,9 +1238,9 @@ def staff_checkin(request, id):
             attendance.log_out = None
             attendance.total_hours = None
             attendance.save()
-            messages.success(request, "Absent marked successfully.")
+            messages.error(request, "Absent marked successfully.")
 
-        return redirect('staff_dashboard')
+        return back_to_checkin
 
     active_attendance = Attendance.objects.filter(
         staff=staff, log_in__isnull=False, log_out__isnull=True
@@ -1249,7 +1254,6 @@ def staff_checkin(request, id):
         'is_leave_or_absent': is_leave_or_absent,
         'is_checkout_closed': is_checkout_closed,
     })
-
 # ================================ DOCUMENT VIEWS ================================
 
 def _detect_document_type(filename):

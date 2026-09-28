@@ -1,8 +1,7 @@
 {% extends 'leads/base.html' %}
 
 {% block content %}
-
-<body>
+{% include 'partials/toast_messages.html' %}
 
 <div class="calllog-container">
 
@@ -243,6 +242,4 @@ const searchLeadNameUrl = "{% url 'leads:search_lead_by_name' %}";
 </div>
 </div>
 
-
-</body>
 {% endblock %}

@@ -102,18 +102,18 @@ WSGI_APPLICATION = 'csc_crm.wsgi.application'
 #     }
 # }
 
-import dj_database_url
-
-DATABASES = {
-   'default': dj_database_url.parse(os.environ.get("DATABASE_URL"))
-}
+# import dj_database_url
 
 # DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': BASE_DIR / 'db.sqlite3',
-#     }
+#    'default': dj_database_url.parse(os.environ.get("DATABASE_URL"))
 # }
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    }
+}
 
 
 # Password validation
@@ -193,3 +193,16 @@ CLOUDINARY_STORAGE = {
 LOGIN_URL = 'staff_login'
 LOGIN_REDIRECT_URL = 'staff_dashboard'
 LOGOUT_REDIRECT_URL = 'staff_login'
+
+# ============ EMAIL CONFIG (BREVO SMTP) ============
+if os.environ.get('EMAIL_HOST_USER'):
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST = 'smtp-relay.brevo.com'
+    EMAIL_PORT = 587
+    EMAIL_USE_TLS = True
+    EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER')
+    EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD')
+    DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'CSC Computer Education <noreply@csc.com>')
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    DEFAULT_FROM_EMAIL = 'csc.attendance@example.com'

@@ -1,11 +1,4 @@
-
-{% if messages %}
-    {% for message in messages %}
-        <div class="alert-message">
-            {{ message }}
-        </div>
-    {% endfor %}
-{% endif %}
+{% include 'partials/toast_messages.html' %}
 
 <!--========================= Staff-Container ========================-->
 

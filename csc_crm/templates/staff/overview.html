@@ -3,18 +3,7 @@
 {% block content %}
 
 <!-- ======================================== Header ================================================== -->
-
-{% if messages %}
-    <div class="messages">
-        {% for message in messages %}
-                <div class="alert alert-{{ message.tags }}">
-                    {{ message }}
-                </div>
-        {% endfor %}
-    </div>
-{% endif %}
-
-
+{% include 'partials/toast_messages.html' %}
 
 <div class="over-top-header">
 
@@ -633,7 +622,7 @@
 
     <div class="over-box-head">
         <h2><i class="fa-solid fa-calendar-days"></i> Meeting & Class Schedule</h2>
-        <a href="#" class="over-viewall-btn">View All</a>
+        <a href="{% url 'schedule_page' %}" class="over-viewall-btn">View All</a>
     </div>
 
     <table>

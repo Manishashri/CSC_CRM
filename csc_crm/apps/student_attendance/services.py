@@ -97,7 +97,7 @@ def get_low_attendance_data():
 
         total_working_days = (attendance_records.values('attendance_date').distinct().count())
         
-        if attendance_records.count() < 3:
+        if attendance_records.count() < 1:
             continue
 
         present_count = attendance_records.filter(Q(status='Present') | Q(status='Late')).count()
@@ -122,12 +122,10 @@ def get_low_attendance_data():
             attendance_percentage = 100
 
         # Alert Logic
-        if (attendance_percentage < 60 and attendance_records.count() < 3):
+        if attendance_percentage < 60:
             alert_level = "Critical"
-
-        elif (attendance_percentage < 75):
+        elif attendance_percentage < 75:
             alert_level = "Warning"
-
         else:
             continue
 

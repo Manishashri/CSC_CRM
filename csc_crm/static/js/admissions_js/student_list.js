@@ -196,8 +196,95 @@ if (searchIdInput) {
     searchIdInput.addEventListener("blur", validateSearchId);
 }
 
-// Require at least one filter to be filled before searching
+/*=========================================
+        SHARED: update the download form's
+        hidden fields (search/id/course_name/batch)
+        so Excel/PDF export always matches
+        whatever is currently filtered on screen
+=========================================*/
+
+function syncDownloadHiddenFields(params) {
+
+    const downloadForm = document.getElementById("downloadForm");
+    if (!downloadForm) return;
+
+    ["search", "id", "course_name", "batch"].forEach(function (key) {
+        const hidden = downloadForm.querySelector('input[name="' + key + '"]');
+        if (hidden) {
+            hidden.value = params.get(key) || "";
+        }
+    });
+}
+
+/*=========================================
+        SHARED: swap the table / counts /
+        pagination from a fetched page into
+        the current DOM, without a full reload
+=========================================*/
+
+function swapOne(selector, doc) {
+
+    const current = document.querySelector(selector);
+    const incoming = doc.querySelector(selector);
+
+    // guard: if either side is missing this element, skip it quietly
+    // instead of throwing (which used to trip the catch() and show a
+    // false "something went wrong" message even when the fetch worked).
+    if (current && incoming) {
+        current.innerHTML = incoming.innerHTML;
+    }
+}
+
+function swapListingFromDoc(doc) {
+
+    // TABLE UPDATE
+    swapOne(".table-wrapper", doc);
+
+    // TOTAL STUDENTS UPDATE
+    swapOne(".total-count", doc);
+
+    // PAGINATION INFO UPDATE ("Showing X to Y of Z students")
+    swapOne(".pagination-info", doc);
+
+    // PAGINATION BUTTONS UPDATE
+    // NOTE: the actual class in student_list.html is ".pagination-right",
+    // not ".pagination-buttons" - that mismatch was throwing on every
+    // AJAX swap and triggering the red error message below.
+    swapOne(".pagination-right", doc);
+}
+
+/*=========================================
+        FILTER / SEARCH (AJAX)
+        Builds the query string from the form,
+        validates it, fetches the filtered page,
+        and swaps the table in-place - same
+        pattern as the Reset button below.
+=========================================*/
+
+function runFilterSearch(url) {
+
+    fetch(url)
+        .then(response => response.text())
+        .then(data => {
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(data, "text/html");
+
+            swapListingFromDoc(doc);
+
+            const params = new URL(url, window.location.origin).searchParams;
+            syncDownloadHiddenFields(params);
+        })
+        .catch(() => {
+            error.innerText = "Something went wrong while searching. Please try again.";
+            error.style.color = "red";
+        });
+}
+
 form.addEventListener("submit", function (e) {
+
+    // always AJAX - never let this do a normal full-page GET
+    e.preventDefault();
 
     const inputs = form.querySelectorAll("input");
     const selects = form.querySelectorAll("select");
@@ -225,27 +312,44 @@ form.addEventListener("submit", function (e) {
     // ALL EMPTY
     if (!hasValue) {
 
-        e.preventDefault();
-
         error.innerText = "Enter at least one filter";
         error.style.color = "red";
+        return;
+    }
 
-    } else if (!validName || !validId) {
-
-        e.preventDefault();
+    if (!validName || !validId) {
 
         const firstError = form.querySelector(".error-input");
         if (firstError) {
             firstError.scrollIntoView({ behavior: "smooth", block: "center" });
             firstError.focus();
         }
-
-    } else {
-
-        error.innerText = "";
-
+        return;
     }
 
+    error.innerText = "";
+
+    // BUILD QUERY STRING (skip empty fields to keep the URL clean)
+    const params = new URLSearchParams();
+
+    inputs.forEach(input => {
+        if (input.name && input.value.trim() !== "") {
+            params.set(input.name, input.value.trim());
+        }
+    });
+
+    selects.forEach(select => {
+        if (select.name && select.value.trim() !== "") {
+            params.set(select.name, select.value.trim());
+        }
+    });
+
+    const newUrl = window.location.pathname + "?" + params.toString();
+
+    // UPDATE ADDRESS BAR (so refresh/back keeps the filter)
+    window.history.pushState({}, document.title, newUrl);
+
+    runFilterSearch(newUrl);
 });
 
 
@@ -275,25 +379,13 @@ document.getElementById("resetBtn").addEventListener("click", function () {
         .then(response => response.text())
         .then(data => {
 
-            let parser = new DOMParser();
-            let doc = parser.parseFromString(data, "text/html");
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(data, "text/html");
 
-            // TABLE UPDATE
-            document.querySelector(".table-wrapper").innerHTML =
-                doc.querySelector(".table-wrapper").innerHTML;
+            swapListingFromDoc(doc);
 
-            // TOTAL STUDENTS UPDATE
-            document.querySelector(".total-count").innerHTML =
-                doc.querySelector(".total-count").innerHTML;
-
-            // PAGINATION INFO UPDATE
-            document.querySelector(".pagination-info").innerHTML =
-                doc.querySelector(".pagination-info").innerHTML;
-
-            // PAGINATION BUTTONS UPDATE
-            document.querySelector(".pagination-buttons").innerHTML =
-                doc.querySelector(".pagination-buttons").innerHTML;
-
+            // CLEAR THE DOWNLOAD FORM'S HIDDEN FIELDS TOO
+            syncDownloadHiddenFields(new URLSearchParams());
         });
 
 });
