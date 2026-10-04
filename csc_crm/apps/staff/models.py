@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.conf import settings
 import uuid
 from cloudinary.models import CloudinaryField
+from csc_crm.validators import validate_indian_mobile
 
 
 class Department(models.Model):
@@ -80,7 +81,7 @@ class Staff(models.Model):
     first_name = models.CharField(max_length=20)
     last_name = models.CharField(max_length=20)
     email = models.EmailField(unique=True, db_index=True)
-    phone = models.CharField(max_length=13, unique=True)
+    phone = models.CharField(max_length=13, unique=True, validators=[validate_indian_mobile])
 
     # Role & Department
     role = models.ForeignKey(StaffRole, on_delete=models.PROTECT, related_name='staff_members')
@@ -106,7 +107,7 @@ class Staff(models.Model):
     # Contact & Emergency
     
     emergency_contact_name = models.CharField(max_length=100, blank=True, null=True)
-    emergency_contact_phone = models.CharField(max_length=15, blank=True, null=True)
+    emergency_contact_phone = models.CharField(max_length=15, blank=True, null=True, validators=[validate_indian_mobile])
 
     #password
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='staff_profile', null=True, blank=True)

@@ -10,7 +10,8 @@ from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
+from django.conf import settings
 
 from openpyxl import Workbook
 from functools import wraps
@@ -23,6 +24,10 @@ import os
 from csc_crm.apps.leads.models import *
 from csc_crm.apps.admissions.models import *
 from csc_crm.apps.student_attendance.models import *
+
+from csc_crm.apps.student_attendance.attendance_utils import (
+    get_long_absent_streaks, ongoing_batch_q, completed_batch_q
+)
 
 from .models import *
 from .forms import *
@@ -289,24 +294,6 @@ def staff_management(request):
     }
     return render(request, 'staff/management.html', context)
 
-# ========================== AUTO GENERATE EMP ID ==========================
-
-def generate_employee_id():
-    staff_ids = Staff.objects.values_list('employee_id', flat=True)
-
-    max_number = 0
-
-    for employee_id in staff_ids:
-        match = re.match(r'^EMP(\d+)$', employee_id)
-
-        if match:
-            number = int(match.group(1))
-
-            if number > max_number:
-                max_number = number
-
-    return f"EMP{max_number + 1:03d}"
-
 # ========================== CREATE NEW STAFF ==============================
 def _get_staff_roles_map():
     """{ staff_id (str): role_name } — JS ku Reporting Manager dropdown 
@@ -365,9 +352,8 @@ def add_staff(request):
         else:
             print(form.errors)
     else:
-        form = StaffForm(
-            initial={'employee_id': generate_employee_id()}
-        )
+        # Employee ID is entered manually - nothing is pre-filled
+        form = StaffForm()
 
     context = {
         'page_title': 'Add New Staff',
@@ -392,6 +378,25 @@ def check_email(request):
     return JsonResponse({
         'exists': email_exists
     })
+
+# ======================= CHECK EMPLOYEE ID EXISTING (FOR VALIDATION) ====================
+
+@login_required(login_url='staff_login')
+def check_employee_id(request):
+    """Live duplicate check for the manual Employee ID field."""
+    employee_id = request.GET.get('employee_id', '').strip()
+    staff_id = request.GET.get('staff_id')
+
+    exists = False
+    if employee_id:
+        qs = Staff.objects.filter(employee_id__iexact=employee_id)
+        if staff_id:
+            qs = qs.exclude(id=staff_id)
+        exists = qs.exists() or User.objects.filter(
+            username__iexact=employee_id
+        ).exclude(staff_profile__id=staff_id or 0).exists()
+
+    return JsonResponse({'exists': exists})
 
 # ======================= CHECK PHONE NO EXISTING (FOR VALIDATION) ====================
 
@@ -714,7 +719,8 @@ def overview(request, staff_id=None):
     is_present_today = today_status in ["Present", "Late"]
 
     attendance_qs = Attendance.objects.filter(staff=staff)
-    total_working_days = attendance_qs.count()
+    # Official working days (fixed value from settings - Requirement 05)
+    total_working_days = settings.STAFF_TOTAL_WORKING_DAYS
     present_days = attendance_qs.filter(status="Present").count()
     late_days = attendance_qs.filter(status="Late").count()
     absent_days = attendance_qs.filter(status="Absent").count()
@@ -722,7 +728,7 @@ def overview(request, staff_id=None):
 
     attendance_score = present_days + (late_days * 0.5)
     attendance_percentage = (
-        round((attendance_score / total_working_days) * 100)
+        min(round((attendance_score / total_working_days) * 100), 100)
         if total_working_days > 0 else 0
     )
 
@@ -1031,7 +1037,8 @@ def attendance_page(request, id):
         attendance_data = attendance_data.filter(date__year=year)
 
     # ================= COUNTS =================
-    total_working_days = attendance_data.count()
+    # Official working days (fixed value from settings - Requirement 05)
+    total_working_days = settings.STAFF_TOTAL_WORKING_DAYS
     present_days = attendance_data.filter(status__in=['Present', 'Late']).count()
     absent_days = attendance_data.filter(status='Absent').count()
     leave_days = attendance_data.filter(status='Leave').count()
@@ -1040,7 +1047,7 @@ def attendance_page(request, id):
     attendance_score = (attendance_data.filter(status='Present').count() +(late_days * 0.5))
 
     if total_working_days > 0:
-        attendance_percentage = int(attendance_score / total_working_days * 100)
+        attendance_percentage = min(int(attendance_score / total_working_days * 100), 100)
     else:
         attendance_percentage = 0
     
@@ -1189,8 +1196,14 @@ def staff_checkin(request, id):
             attendance.log_in = current_time
             attendance.log_out = None
             attendance.total_hours = None
-            office_time = datetime.strptime("09:15", "%H:%M").time()
-            attendance.status = 'Late' if current_time.time() > office_time else 'Present'
+            # Scheduled login (9:00) + 30 min grace = 9:30.
+            # 9:30:00 or earlier -> Present, after 9:30:00 -> Late.
+            login_hour, login_minute = settings.STAFF_LOGIN_TIME
+            grace_limit = (
+                datetime.combine(today, time(login_hour, login_minute))
+                + timedelta(minutes=settings.STAFF_CHECKIN_GRACE_MINUTES)
+            ).time()
+            attendance.status = 'Late' if current_time.time() > grace_limit else 'Present'
             attendance.save()
 
             if attendance.status == 'Late':
@@ -1433,16 +1446,16 @@ def staff_dashboard(request):
     trainer_total_students = 0
     trainer_active_students = 0
     trainer_completed_students = 0
-    trainer_dropped_students = 0
+    trainer_long_absent_students = 0
     trainer_recent_students = []
 
     trainer_active_students_pct = 0
     trainer_completed_students_pct = 0
-    trainer_dropped_students_pct = 0
+    trainer_long_absent_students_pct = 0
 
     trainer_active_students_deg = 0
     trainer_completed_students_deg = 0
-    trainer_dropped_students_deg = 0
+    trainer_long_absent_students_deg = 0
 
     trainer_total_batches = 0
     trainer_ongoing_batches = 0
@@ -1460,17 +1473,20 @@ def staff_dashboard(request):
             'admission__student'
         ).distinct().count()
 
-        trainer_active_students = trainer_enrollments.filter(
-            batch__status='Ongoing'
-        ).count()
+        trainer_ongoing = trainer_enrollments.filter(
+            ongoing_batch_q('batch__')
+        )
+
+        trainer_long_absent_students = len(
+            get_long_absent_streaks(trainer_ongoing)
+        )
+
+        trainer_active_students = (
+            trainer_ongoing.count() - trainer_long_absent_students
+        )
 
         trainer_completed_students = trainer_enrollments.filter(
-            batch__status='Completed'
-        ).count()
-
-        trainer_dropped_students = Admission.objects.filter(
-            status='dropped',
-            enrollment__batch__trainer=my_staff
+            completed_batch_q('batch__')
         ).count()
 
         trainer_recent_students = Student.objects.filter(
@@ -1489,8 +1505,8 @@ def staff_dashboard(request):
                 1
             )
 
-            trainer_dropped_students_pct = round(
-                (trainer_dropped_students / trainer_total_students) * 100,
+            trainer_long_absent_students_pct = round(
+                (trainer_long_absent_students / trainer_total_students) * 100,
                 1
             )
 
@@ -1501,9 +1517,9 @@ def staff_dashboard(request):
             (trainer_completed_students_pct * 3.6)
         )
 
-        trainer_dropped_students_deg = (
+        trainer_long_absent_students_deg = (
             trainer_completed_students_deg +
-            (trainer_dropped_students_pct * 3.6)
+            (trainer_long_absent_students_pct * 3.6)
         )
 
         trainer_batches_qs = Batch.objects.filter(
@@ -2201,17 +2217,32 @@ def staff_dashboard(request):
 
     total_students = Student.objects.count()
 
-    active_students = Enrollment.objects.filter(
-        batch__status='Ongoing'
-    ).count()
+    # Active / Completed / Long-Absent are separate groups, all taken from
+    # the real enrollment + attendance records (Requirement 01).
+    ongoing_enrollments = Enrollment.objects.filter(ongoing_batch_q('batch__'))
+
+    long_absent_streaks = get_long_absent_streaks(ongoing_enrollments)
+
+    long_absent_students = len(long_absent_streaks)
+
+    active_students = ongoing_enrollments.count() - long_absent_students
 
     completed_students = Enrollment.objects.filter(
-        batch__status='Completed'
+        completed_batch_q('batch__')
     ).count()
 
-    dropped_students = Admission.objects.filter(
-        status='dropped'
-    ).count()
+    long_absent_list = [
+        {
+            'name': e.student.first_name + ' ' + e.student.last_name,
+            'batch': e.batch.batch_name if e.batch else '',
+            'days': long_absent_streaks[e.id],
+        }
+        for e in Enrollment.objects.filter(
+            id__in=long_absent_streaks.keys()
+        ).select_related('admission__student', 'batch')
+    ]
+    long_absent_list.sort(key=lambda x: -x['days'])
+    long_absent_list = long_absent_list[:5]
 
     recent_students = Student.objects.order_by(
         '-id'
@@ -2233,8 +2264,8 @@ def staff_dashboard(request):
             1
         )
 
-        dropped_students_pct = round(
-            (dropped_students / total_students) * 100,
+        long_absent_students_pct = round(
+            (long_absent_students / total_students) * 100,
             1
         )
 
@@ -2242,7 +2273,7 @@ def staff_dashboard(request):
 
         active_students_pct = 0
         completed_students_pct = 0
-        dropped_students_pct = 0
+        long_absent_students_pct = 0
 
     active_students_deg = active_students_pct * 3.6
 
@@ -2251,9 +2282,9 @@ def staff_dashboard(request):
         (completed_students_pct * 3.6)
     )
 
-    dropped_students_deg = (
+    long_absent_students_deg = (
         completed_students_deg +
-        (dropped_students_pct * 3.6)
+        (long_absent_students_pct * 3.6)
     )
 
     # ================================
@@ -2349,16 +2380,18 @@ def staff_dashboard(request):
         'total_students': total_students,
         'active_students': active_students,
         'completed_students': completed_students,
-        'dropped_students': dropped_students,
+        'long_absent_students': long_absent_students,
+        'long_absent_list': long_absent_list,
+        'LONG_ABSENT_DAYS': settings.LONG_ABSENT_CONSECUTIVE_DAYS,
         'recent_students': recent_students,
 
         'active_students_pct': active_students_pct,
         'completed_students_pct': completed_students_pct,
-        'dropped_students_pct': dropped_students_pct,
+        'long_absent_students_pct': long_absent_students_pct,
 
         'active_students_deg': active_students_deg,
         'completed_students_deg': completed_students_deg,
-        'dropped_students_deg': dropped_students_deg,
+        'long_absent_students_deg': long_absent_students_deg,
 
         # Batch Module
 
@@ -2427,22 +2460,22 @@ def staff_dashboard(request):
         'trainer_total_students': trainer_total_students,
         'trainer_active_students': trainer_active_students,
         'trainer_completed_students': trainer_completed_students,
-        'trainer_dropped_students': trainer_dropped_students,
+        'trainer_long_absent_students': trainer_long_absent_students,
         'trainer_recent_students': trainer_recent_students,
 
         'trainer_active_students_pct':
             trainer_active_students_pct,
         'trainer_completed_students_pct':
             trainer_completed_students_pct,
-        'trainer_dropped_students_pct':
-            trainer_dropped_students_pct,
+        'trainer_long_absent_students_pct':
+            trainer_long_absent_students_pct,
 
         'trainer_active_students_deg':
             trainer_active_students_deg,
         'trainer_completed_students_deg':
             trainer_completed_students_deg,
-        'trainer_dropped_students_deg':
-            trainer_dropped_students_deg,
+        'trainer_long_absent_students_deg':
+            trainer_long_absent_students_deg,
 
         'trainer_total_batches': trainer_total_batches,
         'trainer_ongoing_batches': trainer_ongoing_batches,
