@@ -1804,50 +1804,81 @@ def reports(request):
 
     validation_errors = []
 
-    trainer_batch_ids = None
-    if my_role == 'Trainer':
-        trainer_batch_ids = list(Batch.objects.filter(trainer=my_staff).values_list('id', flat=True))
+    # ============================================================
+    # VALIDATION
+    # ============================================================
 
     if batch_filter:
         try:
             batch_filter_id = int(batch_filter)
         except (TypeError, ValueError):
-            validation_errors.append("Selected batch value is invalid, so the batch filter was ignored.")
+            validation_errors.append(
+                "Selected batch value is invalid, so the batch filter was ignored."
+            )
             batch_filter = None
         else:
             batch_lookup = Batch.objects.filter(id=batch_filter_id)
+
             if my_role == 'Trainer':
                 batch_lookup = batch_lookup.filter(trainer=my_staff)
+
             if not batch_lookup.exists():
-                validation_errors.append("Selected batch could not be found, so the batch filter was ignored.")
+                validation_errors.append(
+                    "Selected batch could not be found, so the batch filter was ignored."
+                )
                 batch_filter = None
 
     if course_filter:
         if not Course.objects.filter(course_name__iexact=course_filter).exists():
-            validation_errors.append("Selected course could not be found, so the course filter was ignored.")
+            validation_errors.append(
+                "Selected course could not be found, so the course filter was ignored."
+            )
             course_filter = None
 
-    valid_status_values = {"excellent", "good", "warning", "critical"}
+    valid_status_values = {
+        "excellent",
+        "good",
+        "warning",
+        "critical"
+    }
+
     if status_filter and status_filter.lower() not in valid_status_values:
-        validation_errors.append("Selected status is not recognized, so the status filter was ignored.")
+        validation_errors.append(
+            "Selected status is not recognized, so the status filter was ignored."
+        )
         status_filter = None
 
     if attendance_filter:
         try:
             attendance_filter_value = float(attendance_filter)
+
             if attendance_filter_value < 0 or attendance_filter_value > 100:
                 raise ValueError
+
         except (TypeError, ValueError):
-            validation_errors.append("Attendance % must be a number between 0 and 100, so the attendance filter was ignored.")
+            validation_errors.append(
+                "Attendance % must be a number between 0 and 100, "
+                "so the attendance filter was ignored."
+            )
             attendance_filter = None
 
     if distribution_percentage_filter:
         try:
-            distribution_percentage_value = float(distribution_percentage_filter)
-            if distribution_percentage_value < 0 or distribution_percentage_value > 100:
+            distribution_percentage_value = float(
+                distribution_percentage_filter
+            )
+
+            if (
+                distribution_percentage_value < 0
+                or distribution_percentage_value > 100
+            ):
                 raise ValueError
+
         except (TypeError, ValueError):
-            validation_errors.append("Distribution % must be a number between 0 and 100, so that filter was ignored.")
+            validation_errors.append(
+                "Distribution % must be a number between 0 and 100, "
+                "so that filter was ignored."
+            )
             distribution_percentage_filter = None
 
     def _parse_filter_date(value):
@@ -1856,44 +1887,86 @@ def reports(request):
         except (TypeError, ValueError):
             return None
 
-    parsed_date_from = _parse_filter_date(date_from_filter) if date_from_filter else None
-    parsed_date_to = _parse_filter_date(date_to_filter) if date_to_filter else None
+    parsed_date_from = (
+        _parse_filter_date(date_from_filter)
+        if date_from_filter
+        else None
+    )
+
+    parsed_date_to = (
+        _parse_filter_date(date_to_filter)
+        if date_to_filter
+        else None
+    )
 
     if date_from_filter and not parsed_date_from:
-        validation_errors.append("From date is invalid, so the date range filter was ignored.")
+        validation_errors.append(
+            "From date is invalid, so the date range filter was ignored."
+        )
         date_from_filter = None
 
     if date_to_filter and not parsed_date_to:
-        validation_errors.append("To date is invalid, so the date range filter was ignored.")
+        validation_errors.append(
+            "To date is invalid, so the date range filter was ignored."
+        )
         date_to_filter = None
 
     if parsed_date_from and parsed_date_to and parsed_date_from > parsed_date_to:
-        validation_errors.append("From date cannot be after To date, so the date range filter was ignored.")
+        validation_errors.append(
+            "From date cannot be after To date, so the date range filter was ignored."
+        )
         date_from_filter = None
         date_to_filter = None
+
+    # ============================================================
+    # BATCH CHART TITLE
+    # ============================================================
 
     batch_chart_title = "Batch-wise Attendance"
 
     if batch_filter:
-        selected_batch_obj = Batch.objects.filter(id=batch_filter).first()
+        selected_batch_obj = (
+            Batch.objects
+            .select_related('course')
+            .filter(id=batch_filter)
+            .first()
+        )
+
         if selected_batch_obj:
             batch_chart_title = (
                 f"Batch-wise Attendance - "
                 f"{selected_batch_obj.batch_name}"
                 f"({selected_batch_obj.course.course_name})"
             )
+
     elif course_filter:
-        batch_chart_title = f"Batch-wise Attendance - {course_filter.title()}"
+        batch_chart_title = (
+            f"Batch-wise Attendance - {course_filter.title()}"
+        )
+
+    # ============================================================
+    # TODAY ATTENDANCE SUMMARY
+    # ============================================================
 
     total_students_qs = Enrollment.objects.all()
-    attendance_today_qs = Attendance.objects.filter(attendance_date=today)
+
+    attendance_today_qs = Attendance.objects.filter(
+        attendance_date=today
+    )
 
     if my_role == 'Trainer':
-        total_students_qs = total_students_qs.filter(batch__trainer=my_staff)
-        attendance_today_qs = attendance_today_qs.filter(batch__trainer=my_staff)
+        total_students_qs = total_students_qs.filter(
+            batch__trainer=my_staff
+        )
+
+        attendance_today_qs = attendance_today_qs.filter(
+            batch__trainer=my_staff
+        )
 
     total_students = total_students_qs.count()
+
     today_marked_count = attendance_today_qs.count()
+
     pending_count = total_students - today_marked_count
 
     if today_marked_count == 0:
@@ -1903,55 +1976,110 @@ def reports(request):
     else:
         attendance_status = "completed"
 
-    present_today = attendance_today_qs.filter(Q(status='Present') | Q(status='Late')).count()
-    absent_today = attendance_today_qs.filter(status='Absent').count()
+    # Present + Late
+    present_today = attendance_today_qs.filter(
+        Q(status='Present') | Q(status='Late')
+    ).count()
+
+    absent_today = attendance_today_qs.filter(
+        status='Absent'
+    ).count()
+
+    # ============================================================
+    # LOW ATTENDANCE
+    # ============================================================
 
     low_attendance_all = get_low_attendance_data()
+
     if my_role == 'Trainer':
         low_attendance_all = [
             s for s in low_attendance_all
-            if s['batch'] and s['batch'].trainer_id == my_staff.id
+            if s['batch']
+            and s['batch'].trainer_id == my_staff.id
         ]
+
     low_attendance = len(low_attendance_all)
+
+    # ============================================================
+    # REPORT STUDENTS
+    # ============================================================
 
     report_students = []
 
-    enrollments = Enrollment.objects.select_related('admission__student', 'admission__course_name', 'batch')
+    enrollments = (
+        Enrollment.objects
+        .select_related(
+            'admission__student',
+            'admission__course_name',
+            'batch'
+        )
+    )
 
     if my_role == 'Trainer':
-        enrollments = enrollments.filter(batch__trainer=my_staff)
+        enrollments = enrollments.filter(
+            batch__trainer=my_staff
+        )
 
     if course_filter:
-        enrollments = enrollments.filter(admission__course_name__course_name__iexact=course_filter)
+        enrollments = enrollments.filter(
+            admission__course_name__course_name__iexact=course_filter
+        )
+
     if batch_filter:
-        enrollments = enrollments.filter(batch_id=batch_filter)
+        enrollments = enrollments.filter(
+            batch_id=batch_filter
+        )
+
     if student_name:
-        enrollments = enrollments.filter(admission__student__first_name__istartswith=student_name)
+        enrollments = enrollments.filter(
+            admission__student__first_name__istartswith=student_name
+        )
 
     # Fetch enrollment IDs once
-    enrollment_ids = list(enrollments.values_list('id', flat=True))
+    enrollment_ids = list(
+        enrollments.values_list('id', flat=True)
+    )
 
-    # Fetch attendance counts for all enrollments in one query
-    attendance_counts_map = get_bulk_attendance_counts(enrollment_ids,date_from_filter,date_to_filter)
+    # One grouped attendance query
+    attendance_counts_map = get_bulk_attendance_counts(
+        enrollment_ids,
+        date_from_filter,
+        date_to_filter
+    )
 
     for enrollment in enrollments:
-        counts = attendance_counts_map.get(enrollment.id, {})
+
+        counts = attendance_counts_map.get(
+            enrollment.id,
+            {}
+        )
 
         present_count = counts.get('present', 0)
         absent_count = counts.get('absent', 0)
         late_count = counts.get('late', 0)
         total_days = counts.get('total', 0)
 
-
         if total_days == 0:
             continue
 
-        status, attendance_rate = get_attendance_status(present_count, absent_count, late_count, total_days)
+        status, attendance_rate = get_attendance_status(
+            present_count,
+            absent_count,
+            late_count,
+            total_days
+        )
 
-        if attendance_filter and round(attendance_rate, 1) != round(float(attendance_filter), 1):
+        if (
+            attendance_filter
+            and round(attendance_rate, 1)
+            != round(float(attendance_filter), 1)
+        ):
             continue
 
-        if status_filter and status.lower() != status_filter.lower():
+        if (
+            status_filter
+            and status.lower() != status_filter.lower()
+        ):
             continue
 
         report_students.append({
@@ -1967,10 +2095,22 @@ def reports(request):
             "total_days": total_days,
         })
 
-    filtered_enrollment_ids = [s["enrollment_id"] for s in report_students]
-    enrollments = enrollments.filter(id__in=filtered_enrollment_ids)
+    filtered_enrollment_ids = [
+        s["enrollment_id"]
+        for s in report_students
+    ]
+
+    enrollments = enrollments.filter(
+        id__in=filtered_enrollment_ids
+    )
+
+    # ============================================================
+    # MONTHLY ATTENDANCE CHART
+    # OPTIMIZED: ONE QUERY INSTEAD OF 48+ QUERIES
+    # ============================================================
 
     monthly_chart_title = "Monthly Attendance Chart"
+
     monthly_present = [0] * 12
     monthly_absent = [0] * 12
     monthly_late = [0] * 12
@@ -1979,101 +2119,346 @@ def reports(request):
     attendance_qs = Attendance.objects.all()
 
     if my_role == 'Trainer':
-        attendance_qs = attendance_qs.filter(batch__trainer=my_staff)
-
-    if student_name:
-        attendance_qs = attendance_qs.filter(enrollment__admission__student__first_name__istartswith=student_name)
-
-    if status_filter or attendance_filter:
-        attendance_qs = attendance_qs.filter(enrollment_id__in=filtered_enrollment_ids)
-
-    if course_filter:
-        attendance_qs = attendance_qs.filter(enrollment__admission__course_name__course_name__icontains=course_filter)
-
-    if batch_filter:
-        attendance_qs = attendance_qs.filter(enrollment__batch_id=batch_filter)
-
-    if date_from_filter:
-        attendance_qs = attendance_qs.filter(attendance_date__gte=date_from_filter)
-
-    if date_to_filter:
-        attendance_qs = attendance_qs.filter(attendance_date__lte=date_to_filter)
-
-    for month in range(1, 13):
-        monthly_present[month - 1] = attendance_qs.filter(
-            attendance_date__month=month, attendance_date__year=today.year, status="Present"
-        ).count()
-
-        monthly_absent[month - 1] = attendance_qs.filter(
-            attendance_date__month=month, attendance_date__year=today.year, status="Absent"
-        ).count()
-
-        monthly_late[month - 1] = attendance_qs.filter(
-            attendance_date__month=month, attendance_date__year=today.year, status="Late"
-        ).count()
-
-        month_marked_days = attendance_qs.filter(
-            attendance_date__month=month, attendance_date__year=today.year
-        ).values("attendance_date").distinct().count()
-
-        month_expected = enrollments.count() * month_marked_days
-
-        monthly_incomplete[month - 1] = max(
-            month_expected - (monthly_present[month - 1] + monthly_absent[month - 1] + monthly_late[month - 1]), 0
+        attendance_qs = attendance_qs.filter(
+            batch__trainer=my_staff
         )
 
-    course_labels = []
-    course_counts = []
+    if student_name:
+        attendance_qs = attendance_qs.filter(
+            enrollment__admission__student__first_name__istartswith=student_name
+        )
+
+    if status_filter or attendance_filter:
+        attendance_qs = attendance_qs.filter(
+            enrollment_id__in=filtered_enrollment_ids
+        )
+
+    if course_filter:
+        attendance_qs = attendance_qs.filter(
+            enrollment__admission__course_name__course_name__icontains=course_filter
+        )
+
+    if batch_filter:
+        attendance_qs = attendance_qs.filter(
+            enrollment__batch_id=batch_filter
+        )
+
+    if date_from_filter:
+        attendance_qs = attendance_qs.filter(
+            attendance_date__gte=date_from_filter
+        )
+
+    if date_to_filter:
+        attendance_qs = attendance_qs.filter(
+            attendance_date__lte=date_to_filter
+        )
+
+    monthly_rows = (
+        attendance_qs
+        .filter(attendance_date__year=today.year)
+        .values('attendance_date__month')
+        .annotate(
+            present=Count(
+                'id',
+                filter=Q(status='Present')
+            ),
+            absent=Count(
+                'id',
+                filter=Q(status='Absent')
+            ),
+            late=Count(
+                'id',
+                filter=Q(status='Late')
+            ),
+            marked_days=Count(
+                'attendance_date',
+                distinct=True
+            )
+        )
+    )
+
+    monthly_data_map = {
+        row['attendance_date__month']: row
+        for row in monthly_rows
+    }
+
+    enrollment_count = enrollments.count()
+
+    for month in range(1, 13):
+
+        row = monthly_data_map.get(
+            month,
+            {
+                'present': 0,
+                'absent': 0,
+                'late': 0,
+                'marked_days': 0,
+            }
+        )
+
+        present = row['present'] or 0
+        absent = row['absent'] or 0
+        late = row['late'] or 0
+        marked_days = row['marked_days'] or 0
+
+        monthly_present[month - 1] = present
+        monthly_absent[month - 1] = absent
+        monthly_late[month - 1] = late
+
+        month_expected = enrollment_count * marked_days
+
+        monthly_incomplete[month - 1] = max(
+            month_expected - (
+                present +
+                absent +
+                late
+            ),
+            0
+        )
+
+    # ============================================================
+    # COURSE COUNTS
+    # OPTIMIZED: ONE GROUPED QUERY
+    # ============================================================
+
     courses = Course.objects.all()
 
-    for course in courses:
-        course_labels.append(course.course_name)
-        course_enrollment_qs = Enrollment.objects.filter(admission__course_name=course)
-        if my_role == 'Trainer':
-            course_enrollment_qs = course_enrollment_qs.filter(batch__trainer=my_staff)
-        course_counts.append(course_enrollment_qs.count())
+    course_labels = [
+        course.course_name
+        for course in courses
+    ]
+
+    course_counts_qs = Enrollment.objects.all()
+
+    if my_role == 'Trainer':
+        course_counts_qs = course_counts_qs.filter(
+            batch__trainer=my_staff
+        )
+
+    course_count_rows = (
+        course_counts_qs
+        .values('admission__course_name_id')
+        .annotate(total=Count('id'))
+    )
+
+    course_count_map = {
+        row['admission__course_name_id']: row['total']
+        for row in course_count_rows
+    }
+
+    course_counts = [
+        course_count_map.get(course.id, 0)
+        for course in courses
+    ]
+
+    # ============================================================
+    # BATCH LIST
+    # ============================================================
+
+    batches = (
+        Batch.objects
+        .select_related('course')
+        .all()
+    )
+
+    if my_role == 'Trainer':
+        batches = batches.filter(
+            trainer=my_staff
+        )
+
+    if course_filter:
+        batches = batches.filter(
+            course__course_name__icontains=course_filter
+        )
+
+    if batch_filter:
+        batches = batches.filter(
+            id=batch_filter
+        )
+
+    # Convert to list so queryset is evaluated once
+    batches = list(batches)
 
     batch_labels = []
     batch_counts = []
     batch_present_counts = []
     batch_performance_labels = []
     batch_performance_counts = []
+
     batch_present_list = []
     batch_absent_list = []
     batch_percentage_list = []
     batch_late_list = []
 
-    batches = Batch.objects.all()
+    batch_ids = [
+        batch.id
+        for batch in batches
+    ]
 
-    if my_role == 'Trainer':
-        batches = batches.filter(trainer=my_staff)
+    # ============================================================
+    # BATCH ENROLLMENT COUNTS
+    # ONE QUERY
+    # ============================================================
 
-    if course_filter:
-        batches = batches.filter(course__course_name__icontains=course_filter)
+    batch_enrollment_rows = (
+        Enrollment.objects
+        .filter(batch_id__in=batch_ids)
+        .values('batch_id')
+        .annotate(total=Count('id'))
+    )
 
-    if batch_filter:
-        batches = batches.filter(id=batch_filter)
+    batch_enrollment_count_map = {
+        row['batch_id']: row['total']
+        for row in batch_enrollment_rows
+    }
+
+    # ============================================================
+    # BATCH ATTENDANCE COUNTS
+    # ONE GROUPED QUERY
+    # ============================================================
+
+    batch_attendance_qs = Attendance.objects.filter(
+        batch_id__in=batch_ids,
+        enrollment_id__in=filtered_enrollment_ids
+    )
+
+    if date_from_filter:
+        batch_attendance_qs = batch_attendance_qs.filter(
+            attendance_date__gte=date_from_filter
+        )
+
+    if date_to_filter:
+        batch_attendance_qs = batch_attendance_qs.filter(
+            attendance_date__lte=date_to_filter
+        )
+
+    if not date_from_filter and not date_to_filter:
+
+        latest_date = (
+            Attendance.objects
+            .order_by('-attendance_date')
+            .values_list('attendance_date', flat=True)
+            .first()
+        )
+
+        if latest_date:
+            batch_attendance_qs = batch_attendance_qs.filter(
+                attendance_date=latest_date
+            )
+        else:
+            batch_attendance_qs = batch_attendance_qs.none()
+
+    batch_stats_rows = (
+        batch_attendance_qs
+        .values('batch_id')
+        .annotate(
+            present=Count(
+                'id',
+                filter=Q(status='Present')
+            ),
+            absent=Count(
+                'id',
+                filter=Q(status='Absent')
+            ),
+            late=Count(
+                'id',
+                filter=Q(status='Late')
+            )
+        )
+    )
+
+    batch_stats_map = {}
+
+    for row in batch_stats_rows:
+
+        present = row['present'] or 0
+        absent = row['absent'] or 0
+        late = row['late'] or 0
+
+        total = present + absent + late
+
+        percentage = (
+            round(
+                ((present + late) / total) * 100,
+                1
+            )
+            if total
+            else 0
+        )
+
+        batch_stats_map[row['batch_id']] = {
+            'present': present,
+            'absent': absent,
+            'late': late,
+            'percentage': percentage,
+        }
+
+    # ============================================================
+    # PREPARE BATCH CHART DATA
+    # ============================================================
 
     for batch in batches:
-        stats = compute_batch_stats(batch, enrollment_ids=filtered_enrollment_ids, fallback_to_latest=True)
 
-        batch_labels.append(f"{batch.course.course_name} - {batch.batch_name}")
-        batch_counts.append(Enrollment.objects.filter(batch=batch).count())
+        stats = batch_stats_map.get(
+            batch.id,
+            {
+                'present': 0,
+                'absent': 0,
+                'late': 0,
+                'percentage': 0,
+            }
+        )
 
-        batch_present_list.append(stats["present"])
-        batch_absent_list.append(stats["absent"])
-        batch_late_list.append(stats["late"])
-        batch_percentage_list.append(stats["percentage"])
-        batch_present_counts.append(stats["percentage"])
-        batch_performance_labels.append(f"{batch.course.course_name} - {batch.batch_name}")
-        batch_performance_counts.append(stats["percentage"])
+        batch_labels.append(
+            f"{batch.course.course_name} - {batch.batch_name}"
+        )
+
+        batch_counts.append(
+            batch_enrollment_count_map.get(
+                batch.id,
+                0
+            )
+        )
+
+        batch_present_list.append(
+            stats["present"]
+        )
+
+        batch_absent_list.append(
+            stats["absent"]
+        )
+
+        batch_late_list.append(
+            stats["late"]
+        )
+
+        batch_percentage_list.append(
+            stats["percentage"]
+        )
+
+        batch_present_counts.append(
+            stats["percentage"]
+        )
+
+        batch_performance_labels.append(
+            f"{batch.course.course_name} - {batch.batch_name}"
+        )
+
+        batch_performance_counts.append(
+            stats["percentage"]
+        )
 
     if course_filter:
-        monthly_chart_title = f"Monthly Attendance Chart - {course_filter.title()}"
+        monthly_chart_title = (
+            f"Monthly Attendance Chart - {course_filter.title()}"
+        )
 
+    # ============================================================
+    # FILTER STATE
+    # ============================================================
 
     is_filtered = bool(
-    course_filter
+        course_filter
         or batch_filter
         or student_name
         or status_filter
@@ -2083,42 +2468,91 @@ def reports(request):
         or distribution_percentage_filter
     )
 
-    total_attendance = sum(batch_present_list) + sum(batch_absent_list) + sum(batch_late_list)
+    total_attendance = (
+        sum(batch_present_list)
+        + sum(batch_absent_list)
+        + sum(batch_late_list)
+    )
 
     show_batch_chart = True
+
     if is_filtered and (course_filter or batch_filter):
         show_batch_chart = total_attendance > 0
 
-
     warning_message = ""
+
     if not show_batch_chart:
+
         if batch_filter:
-            warning_message = "Attendance has not been marked for the selected batch today."
+            warning_message = (
+                "Attendance has not been marked for the selected batch today."
+            )
+
         elif course_filter:
-            warning_message = "Attendance has not been marked for the selected course today."
+            warning_message = (
+                "Attendance has not been marked for the selected course today."
+            )
 
-    batch_status_map = {}
-    for batch in batches:
-        marked = Attendance.objects.filter(batch=batch, attendance_date=today).exists()
-        batch_status_map[batch.id] = "not_started" if not marked else "done"
+    # ============================================================
+    # BATCH STATUS MAP
+    # OPTIMIZED: ONE QUERY INSTEAD OF ONE QUERY PER BATCH
+    # ============================================================
 
-    distribution_date_from = date_from_filter or today
-    distribution_date_to = date_to_filter or today
+    batch_status_map = {
+        batch_id: "not_started"
+        for batch_id in batch_ids
+    }
+
+    marked_batch_ids = set(
+        Attendance.objects
+        .filter(
+            batch_id__in=batch_ids,
+            attendance_date=today
+        )
+        .values_list('batch_id', flat=True)
+        .distinct()
+    )
+
+    for batch_id in marked_batch_ids:
+        batch_status_map[batch_id] = "done"
+
+    # ============================================================
+    # DISTRIBUTION
+    # ============================================================
+
+    distribution_date_from = (
+        date_from_filter or today
+    )
+
+    distribution_date_to = (
+        date_to_filter or today
+    )
 
     qualifying_enrollment_ids = None
+
     if distribution_percentage_filter:
+
         try:
-            min_percentage = float(distribution_percentage_filter)
+
+            min_percentage = float(
+                distribution_percentage_filter
+            )
+
             qualifying_enrollment_ids = [
-                s["enrollment_id"] for s in report_students
+                s["enrollment_id"]
+                for s in report_students
                 if s["attendance_rate"] >= min_percentage
             ]
+
         except ValueError:
             qualifying_enrollment_ids = None
 
     distribution_enrollments = enrollments
+
     if qualifying_enrollment_ids is not None:
-        distribution_enrollments = enrollments.filter(id__in=qualifying_enrollment_ids)
+        distribution_enrollments = enrollments.filter(
+            id__in=qualifying_enrollment_ids
+        )
 
     distribution_attendance_qs = Attendance.objects.filter(
         enrollment__in=distribution_enrollments,
@@ -2126,49 +2560,79 @@ def reports(request):
         attendance_date__lte=distribution_date_to,
     )
 
-    # Get attendance statistics using a single database query
-    distribution_stats = distribution_attendance_qs.aggregate(
-        present=Count('id', filter=Q(status='Present')),
-        absent=Count('id', filter=Q(status='Absent')),
-        late=Count('id', filter=Q(status='Late')),
-        days_count=Count('attendance_date', distinct=True),
+    distribution_stats = (
+        distribution_attendance_qs
+        .aggregate(
+            present=Count(
+                'id',
+                filter=Q(status='Present')
+            ),
+            absent=Count(
+                'id',
+                filter=Q(status='Absent')
+            ),
+            late=Count(
+                'id',
+                filter=Q(status='Late')
+            ),
+            days_count=Count(
+                'attendance_date',
+                distinct=True
+            ),
+        )
     )
 
-    distribution_present = distribution_stats['present']
-    distribution_absent = distribution_stats['absent']
-    distribution_late = distribution_stats['late']
+    distribution_present = (
+        distribution_stats['present'] or 0
+    )
 
-    distribution_days_count = distribution_stats['days_count'] or 1
+    distribution_absent = (
+        distribution_stats['absent'] or 0
+    )
 
-    distribution_expected_days = (distribution_enrollments.count() * distribution_days_count)
+    distribution_late = (
+        distribution_stats['late'] or 0
+    )
 
-    distribution_incomplete = max(distribution_expected_days - (distribution_present + distribution_absent 
-                                                                + distribution_late), 0)
+    distribution_days_count = (
+        distribution_stats['days_count'] or 1
+    )
 
-    distribution_total = (distribution_present+ distribution_absent + distribution_late + distribution_incomplete)
+    distribution_enrollment_count = (
+        distribution_enrollments.count()
+    )
 
-    def _pct(part):
-        return round((part / distribution_total) * 100, 1) if distribution_total else 0
-
-    distribution_data = {
-        "present": distribution_present,
-        "absent": distribution_absent,
-        "late": distribution_late,
-        "incomplete": distribution_incomplete,
-        "present_pct": _pct(distribution_present),
-        "absent_pct": _pct(distribution_absent),
-        "late_pct": _pct(distribution_late),
-        "incomplete_pct": _pct(distribution_incomplete),
-    }
+    distribution_expected_days = (
+        distribution_enrollment_count
+        * distribution_days_count
+    )
 
     distribution_incomplete = max(
-        distribution_expected_days - (distribution_present + distribution_absent + distribution_late), 0
+        distribution_expected_days
+        - (
+            distribution_present
+            + distribution_absent
+            + distribution_late
+        ),
+        0
     )
 
-    distribution_total = distribution_present + distribution_absent + distribution_late + distribution_incomplete
+    distribution_total = (
+        distribution_present
+        + distribution_absent
+        + distribution_late
+        + distribution_incomplete
+    )
 
     def _pct(part):
-        return round((part / distribution_total) * 100, 1) if distribution_total else 0
+        return (
+            round(
+                (part / distribution_total) * 100,
+                1
+            )
+            if distribution_total
+            else 0
+        )
 
     distribution_data = {
         "present": distribution_present,
@@ -2181,12 +2645,23 @@ def reports(request):
         "incomplete_pct": _pct(distribution_incomplete),
     }
 
-    # ================= OPTIMIZED BATCH-WISE ATTENDANCE STATS =================
+    # ============================================================
+    # ALL BATCH-WISE ATTENDANCE STATS
+    # Used for overall batch chart
+    # ============================================================
 
-    all_batches_qs = Batch.objects.select_related('course').all()
+    all_batches_qs = (
+        Batch.objects
+        .select_related('course')
+        .all()
+    )
 
     if my_role == 'Trainer':
-        all_batches_qs = all_batches_qs.filter(trainer=my_staff)
+        all_batches_qs = all_batches_qs.filter(
+            trainer=my_staff
+        )
+
+    all_batches = list(all_batches_qs)
 
     all_batch_labels = []
     all_batch_present_list = []
@@ -2195,126 +2670,210 @@ def reports(request):
     all_batch_percentage_list = []
     all_batch_ids = []
 
-    # Get the latest attendance date once when no date filters are selected
+    all_batch_ids_query = [
+        batch.id
+        for batch in all_batches
+    ]
+
     latest_date = None
 
     if not date_from_filter and not date_to_filter:
         latest_date = (
-        Attendance.objects
-        .order_by('-attendance_date')
-        .values_list('attendance_date', flat=True)
-        .first()
-    )
+            Attendance.objects
+            .order_by('-attendance_date')
+            .values_list('attendance_date', flat=True)
+            .first()
+        )
 
-    # Build one attendance queryset for all batches
-    batch_attendance_qs = Attendance.objects.filter(batch__in=all_batches_qs)
+    batch_attendance_qs = Attendance.objects.filter(
+        batch_id__in=all_batch_ids_query
+    )
 
     if date_from_filter:
         batch_attendance_qs = batch_attendance_qs.filter(
-        attendance_date__gte=date_from_filter
-    )
+            attendance_date__gte=date_from_filter
+        )
 
     if date_to_filter:
         batch_attendance_qs = batch_attendance_qs.filter(
-        attendance_date__lte=date_to_filter
-    )
+            attendance_date__lte=date_to_filter
+        )
 
     if not date_from_filter and not date_to_filter:
-        batch_attendance_qs = batch_attendance_qs.filter(
-        attendance_date=latest_date
+
+        if latest_date:
+            batch_attendance_qs = batch_attendance_qs.filter(
+                attendance_date=latest_date
+            )
+        else:
+            batch_attendance_qs = batch_attendance_qs.none()
+
+    batch_stats_rows = (
+        batch_attendance_qs
+        .values('batch_id')
+        .annotate(
+            present=Count(
+                'id',
+                filter=Q(status='Present')
+            ),
+            absent=Count(
+                'id',
+                filter=Q(status='Absent')
+            ),
+            late=Count(
+                'id',
+                filter=Q(status='Late')
+            ),
+        )
     )
 
-    # Aggregate attendance counts grouped by batch
-    batch_stats_map = {}
-
-    batch_stats_rows = (batch_attendance_qs.values('batch_id').annotate(
-        present=Count('id', filter=Q(status='Present')),
-        absent=Count('id', filter=Q(status='Absent')),
-        late=Count('id', filter=Q(status='Late')),)
-    )
+    all_batch_stats_map = {}
 
     for row in batch_stats_rows:
+
         present = row['present'] or 0
         absent = row['absent'] or 0
         late = row['late'] or 0
+
         total = present + absent + late
 
-        batch_stats_map[row['batch_id']] = {
-            'present': present,
-            'absent': absent,
-            'late': late,
-            'percentage': round(((present + late) / total) * 100, 1) if total else 0,
+        percentage = (
+            round(
+                ((present + late) / total) * 100,
+                1
+            )
+            if total
+            else 0
+        )
+
+        all_batch_stats_map[row['batch_id']] = {
+            "present": present,
+            "absent": absent,
+            "late": late,
+            "percentage": percentage,
         }
 
-        # Prepare chart data
-        for batch in all_batches_qs:
-            stats = batch_stats_map.get(
-            batch.id,{
-                'present': 0,
-                'absent': 0,
-                'late': 0,
-                'percentage': 0,
+    # IMPORTANT:
+    # This loop is OUTSIDE the batch_stats_rows loop.
+    # This fixes the previous nested-loop performance issue.
+
+    for batch in all_batches:
+
+        stats = all_batch_stats_map.get(
+            batch.id,
+            {
+                "present": 0,
+                "absent": 0,
+                "late": 0,
+                "percentage": 0,
             }
         )
 
-        all_batch_ids.append(batch.id)
-        all_batch_labels.append(f"{batch.course.course_name} - {batch.batch_name}")
-        all_batch_present_list.append(stats['present'])
-        all_batch_absent_list.append(stats['absent'])
-        all_batch_late_list.append(stats['late'])
-        all_batch_percentage_list.append(stats['percentage'])
+        all_batch_ids.append(
+            batch.id
+        )
+
+        all_batch_labels.append(
+            f"{batch.course.course_name} - {batch.batch_name}"
+        )
+
+        all_batch_present_list.append(
+            stats["present"]
+        )
+
+        all_batch_absent_list.append(
+            stats["absent"]
+        )
+
+        all_batch_late_list.append(
+            stats["late"]
+        )
+
+        all_batch_percentage_list.append(
+            stats["percentage"]
+        )
+
+    # ============================================================
+    # CONTEXT
+    # ============================================================
 
     context = {
         "total_students": total_students,
         "present_today": present_today,
         "absent_today": absent_today,
         "low_attendance": low_attendance,
+
         "report_students": report_students,
+
         "monthly_present": monthly_present,
         "monthly_absent": monthly_absent,
         "monthly_late": monthly_late,
         "monthly_incomplete": monthly_incomplete,
+
         "course_labels": course_labels,
         "course_counts": course_counts,
+
         "batch_labels": batch_labels,
         "batch_counts": batch_counts,
+
         "batches": batches,
         "courses": courses,
+
         "batch_present_counts": batch_present_counts,
+
         "batch_performance_labels": batch_performance_labels,
         "batch_performance_counts": batch_performance_counts,
+
         "attendance_status": attendance_status,
         "today_marked_count": today_marked_count,
         "pending_count": pending_count,
+
         "batch_present_list": batch_present_list,
         "batch_absent_list": batch_absent_list,
         "batch_percentage_list": batch_percentage_list,
         "batch_late_list": batch_late_list,
+
         "batch_chart_title": batch_chart_title,
         "monthly_chart_title": monthly_chart_title,
+
         "attendance_date": attendance_date,
+
         "batch_status_map": batch_status_map,
+
         "is_filtered": is_filtered,
         "show_batch_chart": show_batch_chart,
         "warning_message": warning_message,
+
         "date_from_filter": date_from_filter or "",
         "date_to_filter": date_to_filter or "",
-        "distribution_percentage_filter": distribution_percentage_filter or "",
+
+        "distribution_percentage_filter": (
+            distribution_percentage_filter or ""
+        ),
+
         "distribution_data": distribution_data,
+
         "all_batch_labels": all_batch_labels,
         "all_batch_ids": all_batch_ids,
         "all_batch_present_list": all_batch_present_list,
         "all_batch_absent_list": all_batch_absent_list,
         "all_batch_late_list": all_batch_late_list,
         "all_batch_percentage_list": all_batch_percentage_list,
+
         "validation_errors": validation_errors,
     }
+
+    # ============================================================
+    # AJAX RESPONSE
+    # ============================================================
 
     if request.headers.get("x-requested-with") == "XMLHttpRequest":
 
         table_rows_html = render_to_string(
             "attendance/_report_table_rows.html",
-            {"report_students": report_students},
+            {
+                "report_students": report_students
+            },
             request=request
         )
 
@@ -2343,7 +2902,10 @@ def reports(request):
             "validation_errors": validation_errors,
         })
 
-    return render(request, "attendance/reports.html", context)
+    return render(
+        request,"attendance/reports.html",context
+    )
+
 
 def get_filtered_report_students(request, my_staff=None, my_role=None):
     student_name = request.GET.get("student_name")
