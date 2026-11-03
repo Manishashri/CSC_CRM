@@ -68,3 +68,13 @@ def completed_batch_q(prefix=''):
         Q(**{f'{p}status': 'Completed'})
         | (~Q(**{f'{p}status': 'Cancelled'}) & Q(**{f'{p}end_date__lt': today}))
     )
+
+
+def upcoming_batch_q(prefix=''):
+    """Q for batches that have not started yet: start date is in the future, not Completed/Cancelled."""
+    today = timezone.localdate()
+    p = prefix
+    return (
+        ~Q(**{f'{p}status__in': ['Cancelled', 'Completed']})
+        & Q(**{f'{p}start_date__gt': today})
+    )

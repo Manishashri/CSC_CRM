@@ -733,3 +733,40 @@
         font-size:18px;
     }
 }
+
+/* ---- profile photos inside the recent lists ---- */
+.dash-person-avatar { overflow: hidden; }
+.dash-person-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* ---- payment indication next to the student's photo ---- */
+.dash-pay-badge {
+    flex: 0 0 auto;
+    align-self: center;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.dash-pay-badge.pay-paid    { background: #dcfce7; color: #15803d; }
+.dash-pay-badge.pay-partial { background: #fef3c7; color: #b45309; }
+.dash-pay-badge.pay-pending { background: #fee2e2; color: #b91c1c; }
+
+/* Batch Strength - status tag on each recent batch */
+.dash-batch-status {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    font-style: normal;
+}
+.dash-batch-status-ongoing   { background: #dcfce7; color: #15803d; }
+.dash-batch-status-upcoming  { background: #fef3c7; color: #b45309; }
+.dash-batch-status-completed { background: #e5e7eb; color: #4b5563; }

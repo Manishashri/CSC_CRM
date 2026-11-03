@@ -238,6 +238,10 @@
 .sp-photo-upload i { font-size: 24px; color: #9ca3af; display: block; margin-bottom: 4px; }
 .sp-photo-upload p { font-size: 12px; color: #9ca3af; margin: 0; }
 input#profilePhotoInput { display: none; }
+.sp-photo-preview {
+  width: 96px; height: 96px; border-radius: 50%; object-fit: cover;
+  border: 3px solid #e8e8ff; margin: 0 auto 6px; box-shadow: 0 2px 8px rgba(38,33,112,.15);
+}
 .sp-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .sp-form-group { display: flex; flex-direction: column; gap: 4px; }
 .sp-form-group label {

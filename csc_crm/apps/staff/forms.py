@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from .models import *
 from datetime import date
-from .validators import clean_indian_mobile
+from .validators import clean_indian_mobile, clean_person_name
 
 class StaffForm(forms.ModelForm):
     """Form Adding/Editing Staff members"""
@@ -49,13 +49,15 @@ class StaffForm(forms.ModelForm):
             }),
             'first_name' : forms.TextInput(attrs={
                 'class': 'form-control',
-                'placeholder': 'Fisrt Name',
+                'placeholder': 'First Name',
                 'id': 'firstNameInput',
+                'maxlength': '20',
             }),
             'last_name': forms.TextInput(attrs={
                 'class' : 'form-control',
                 'placeholder': 'Last Name',
                 'id': 'lastNameInput',
+                'maxlength': '20',
             }),
             'email': forms.EmailInput(attrs={
                 'class' : 'form-control',
@@ -159,6 +161,12 @@ class StaffForm(forms.ModelForm):
         self.fields['reporting_manager'].label_from_instance = (
             lambda obj: obj.full_name()
         )
+
+    def clean_first_name(self):
+        return clean_person_name(self.cleaned_data.get('first_name'))
+
+    def clean_last_name(self):
+        return clean_person_name(self.cleaned_data.get('last_name'))
 
     def clean_employee_id(self):
         """
@@ -653,10 +661,12 @@ class staffProfileForm(forms.ModelForm):
             'first_name': forms.TextInput(attrs={
                 'class': 'prof-input',
                 'placeholder': 'First Name',
+                'maxlength': '20',
             }),
             'last_name': forms.TextInput(attrs={
                 'class': 'prof-input',
                 'placeholder': 'Last Name',
+                'maxlength': '20',
             }),
             'email': forms.EmailInput(attrs={
                 'class': 'prof-input',
@@ -674,6 +684,12 @@ class staffProfileForm(forms.ModelForm):
                 'id': 'profilePhotoInput',
             }),
         }
+
+    def clean_first_name(self):
+        return clean_person_name(self.cleaned_data.get('first_name'))
+
+    def clean_last_name(self):
+        return clean_person_name(self.cleaned_data.get('last_name'))
 
     def clean_phone(self):
         return clean_indian_mobile(self.cleaned_data.get('phone'))

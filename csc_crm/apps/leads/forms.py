@@ -1,3 +1,4 @@
+from csc_crm.apps.staff.validators import clean_person_name
 import re
 from django import forms
 from django.db.models import Q
@@ -29,7 +30,8 @@ class LeadCaptureForm(forms.ModelForm):
             }),
             'lead_name': forms.TextInput(attrs={
                 'placeholder': 'Enter lead name',
-                'id': 'id_lead_name'
+                'id': 'id_lead_name',
+                'maxlength': '20',
             }),
             'email': forms.TextInput(attrs={
                 'id': 'email',
@@ -39,6 +41,11 @@ class LeadCaptureForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        # Name rule: letters only, 20 characters max (the model column is wider
+        # for old records, so the limit is applied here, on the form).
+        self.fields['lead_name'].max_length = 20
+        self.fields['lead_name'].widget.attrs['maxlength'] = '20'
 
         # Only active staff in these roles (BDE, Telecalling, Sales Executive,
         # Sales Lead). Matching is case-insensitive and covers the role-name
@@ -62,6 +69,9 @@ class LeadCaptureForm(forms.ModelForm):
         phone = self.initial.get('phone_no') or getattr(self.instance, 'phone_no', '')
         if phone and not self.is_bound:
             self.initial['phone_no'] = phone[-10:]
+
+    def clean_lead_name(self):
+        return clean_person_name(self.cleaned_data.get('lead_name'))
 
     def clean_phone_no(self):
         phone = (self.cleaned_data.get('phone_no') or '').strip().replace(' ', '')

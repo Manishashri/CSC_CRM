@@ -222,10 +222,12 @@
     <h2><i class="fa fa-user-pen"></i> Edit Profile</h2>
     <form method="POST" enctype="multipart/form-data">
       {% csrf_token %}
-      <div class="sp-photo-upload" onclick="document.getElementById('profilePhotoInput').click()">
-        <i class="fa fa-camera"></i>
-        <p>Click to change profile photo</p>
+      <div class="sp-photo-upload" id="spPhotoUpload" onclick="document.getElementById('profilePhotoInput').click()">
+        <i class="fa fa-camera" id="spPhotoIcon"></i>
+        <img id="spPhotoPreview" class="sp-photo-preview" alt="Selected photo preview" style="display:none;">
+        <p id="spPhotoText">Click to change profile photo</p>
       </div>
+      <div class="sp-err" id="spPhotoError"></div>
       {{ form.profile_photo }}
       {% if form.profile_photo.errors %}{% for e in form.profile_photo.errors %}<div class="sp-err">{{ e }}</div>{% endfor %}{% endif %}
       <div class="sp-form-grid">
@@ -259,6 +261,66 @@ function openEditModal()  { document.getElementById('editModal').classList.add('
 function closeEditModal() { document.getElementById('editModal').classList.remove('open'); }
 document.getElementById('editModal').addEventListener('click', function(e){ if(e.target===this) closeEditModal(); });
 {% if form.errors %}openEditModal();{% endif %}
+
+// Profile photo: show the selected image (instead of the camera icon) before saving
+document.addEventListener('DOMContentLoaded', function() {
+    const input   = document.getElementById('profilePhotoInput');
+    const icon    = document.getElementById('spPhotoIcon');
+    const preview = document.getElementById('spPhotoPreview');
+    const text    = document.getElementById('spPhotoText');
+    const error   = document.getElementById('spPhotoError');
+    if (!input || !preview) return;
+
+    let objectUrl = null;
+
+    function resetPreview() {
+        if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+        preview.removeAttribute('src');
+        preview.style.display = 'none';
+        if (icon) icon.style.display = '';
+        if (text) text.textContent = 'Click to change profile photo';
+    }
+
+    input.addEventListener('change', function() {
+        const file = input.files && input.files[0];
+        if (error) error.textContent = '';
+
+        if (!file) { resetPreview(); return; }
+
+        if (!file.type || file.type.indexOf('image/') !== 0) {
+            if (error) error.textContent = 'Please select a valid image file.';
+            input.value = '';
+            resetPreview();
+            return;
+        }
+
+        if (file.size > 2 * 1024 * 1024) {
+            if (error) error.textContent = 'Photo must be less than 2 MB.';
+            input.value = '';
+            resetPreview();
+            return;
+        }
+
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = URL.createObjectURL(file);
+
+        preview.onerror = function() {
+            if (error) error.textContent = 'This image could not be displayed. Please choose a JPG or PNG file.';
+            input.value = '';
+            resetPreview();
+        };
+        preview.onload = function() {
+            if (icon) icon.style.display = 'none';
+            preview.style.display = 'block';
+            if (text) text.textContent = file.name + ' - click to change';
+        };
+        preview.src = objectUrl;
+    });
+
+    // Clear the preview whenever the modal is closed without saving
+    const closeBtn = document.querySelector('.sp-modal-close');
+    if (closeBtn) closeBtn.addEventListener('click', function() { input.value = ''; resetPreview(); if (error) error.textContent = ''; });
+});
 
 // Real-time validation
 document.addEventListener('DOMContentLoaded', function() {

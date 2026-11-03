@@ -26,7 +26,7 @@ from csc_crm.apps.admissions.models import *
 from csc_crm.apps.student_attendance.models import *
 
 from .attendance_helpers import (
-    get_long_absent_streaks, ongoing_batch_q, completed_batch_q
+    get_long_absent_streaks, ongoing_batch_q, completed_batch_q, upcoming_batch_q
 )
 from .constants import (
     STAFF_LOGIN_TIME, STAFF_CHECKIN_GRACE_MINUTES,
@@ -228,8 +228,36 @@ def block_roles(blocked_roles):
                 return redirect('staff_login')
 
             if staff.role.role_name in blocked_roles:
-                messages.error(request, 'You do not have permission to access this page.')
-                return redirect('leads:lead_capture_target')
+                raise PermissionDenied
+
+            return view_func(request, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
+# ============================ LEADS MODULE - ROLE GUARD ============================
+# Who may open which Leads pages.  Anyone else (including typing the URL by hand)
+# gets the 403 Access Denied page.
+LEAD_FULL_ROLES = ['Admin', 'Manager', 'Sales Exec Lead']                      # lead list / entry page
+LEAD_ALL_ROLES = LEAD_FULL_ROLES + ['Sales Exec', 'HR']                        # pipeline, details, follow-up, report
+LEAD_CALL_ROLES = LEAD_FULL_ROLES + ['Sales Exec']                             # call logs
+
+
+def lead_roles_required(allowed_roles):
+    """Logged-in staff whose role is in allowed_roles only; otherwise 403."""
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapper(request, *args, **kwargs):
+            if not request.user.is_authenticated:
+                return redirect('staff_login')
+            try:
+                staff = request.user.staff_profile
+            except Staff.DoesNotExist:
+                messages.error(request, 'No staff profile found.')
+                return redirect('staff_login')
+
+            if not staff.role or staff.role.role_name not in allowed_roles:
+                raise PermissionDenied
 
             return view_func(request, *args, **kwargs)
         return wrapper
@@ -256,6 +284,16 @@ def role_required(allowed_roles, marketing_only=False):
             return view_func(request, *args, **kwargs)
         return wrapper
     return decorator
+
+# Roles allowed to open Staff Management (page + CSV export)
+STAFF_MANAGEMENT_ROLES = [
+    'Admin',
+    'Manager',
+    'HR',
+    'Sales Exec Lead',
+    'Marketing Lead',
+    'Developer',
+]
 
 # ============================ LOGIN / LOGOUT ============================
 
@@ -313,18 +351,10 @@ def staff_management(request):
     my_staff = getattr(request.user, 'staff_profile', None)
     my_role = my_staff.role.role_name if my_staff and my_staff.role else None
 
-    allowed_roles = [
-    'Admin',
-    'Manager',
-    'HR',
-    'Sales Exec Lead',
-    'Marketing Lead',
-    'Developer',
-]
+    allowed_roles = STAFF_MANAGEMENT_ROLES
 
     if my_role not in allowed_roles:
-        messages.error(request, 'You do not have permission to access this page.')
-        return redirect('staff_dashboard')
+        raise PermissionDenied
 
     queryset = (
         Staff.objects
@@ -688,6 +718,7 @@ def delete_staff(request, id):
 # =========================== QUICK EDIT/AJAX ===================================
 
 @login_required(login_url='staff_login')
+@role_required(['Admin', 'Manager'])
 def quick_edit_staff(request, id):
     """Quick edit via AJAX"""
 
@@ -732,6 +763,9 @@ def export_staff(request):
 
     my_staff = getattr(request.user, 'staff_profile', None)
     my_role = my_staff.role.role_name if my_staff and my_staff.role else None
+
+    if my_role not in STAFF_MANAGEMENT_ROLES:
+        raise PermissionDenied
 
     response = HttpResponse(content_type ='text/csv')
     response['Content-Disposition'] = 'attachement; filename="staff_list.csv"'
@@ -848,7 +882,7 @@ def overview(request, staff_id=None):
     pending_leads = leads.filter(
         initial_status__in=["new", "contacted", "interested", "demo_scheduled"]
     ).count()
-    recent_leads = leads.order_by("-created_at", "-id")[:6]
+    recent_leads = leads.order_by("-created_at", "-id")[:5]
 
     # === TARGET PROGRESS ===
     target_amount = float(staff.monthly_target or 0)
@@ -923,6 +957,7 @@ def overview(request, staff_id=None):
 
 
 @login_required(login_url='staff_login')
+@role_required(['Admin', 'Manager'])
 def staff_export(request, id):
 
     staff = get_object_or_404(Staff, id=id)
@@ -1126,9 +1161,7 @@ def attendance_page(request, id):
         and my_staff.role.role_name not in ["Admin", "Manager", "HR"]
         and staff.id != my_staff.id
     ):
-        return HttpResponseForbidden(
-            "You do not have permission to access this Staff Attendance."
-        )
+        raise PermissionDenied
     
     if staff.role.role_name == "Admin":
         messages.error(request, "Attendance is not applicable for Admin.")
@@ -1258,6 +1291,17 @@ def export_attendance(request, id):
 
     staff = get_object_or_404(Staff, id=id)
 
+    my_staff = getattr(request.user, 'staff_profile', None)
+    if (
+        not my_staff
+        or not my_staff.role
+        or (
+            my_staff.role.role_name not in ["Admin", "Manager", "HR"]
+            and staff.id != my_staff.id
+        )
+    ):
+        raise PermissionDenied
+
     attendance_data = Attendance.objects.filter(staff=staff)
 
     filter_date = request.GET.get('date')
@@ -1306,6 +1350,11 @@ def staff_checkin(request, id):
     auto_checkout_pending_attendance()
 
     staff = get_object_or_404(Staff, id=id)
+
+    my_staff = getattr(request.user, 'staff_profile', None)
+    if not my_staff or my_staff.id != staff.id:
+        raise PermissionDenied
+
     today = timezone.localdate()
     current_time = timezone.localtime(timezone.now())
     is_checkout_closed = current_time.time() >= time(19, 0)
@@ -1469,10 +1518,27 @@ def _ensure_legacy_document(staff):
     )
 
 
+DOCUMENT_MANAGER_ROLES = ['Admin', 'Manager', 'HR']
+
+
+def _can_access_staff_documents(request, staff):
+    """Own documents, or Admin / Manager / HR for anyone."""
+    my_staff = getattr(request.user, 'staff_profile', None)
+    if not my_staff or not my_staff.role:
+        return False
+    return (
+        my_staff.id == staff.id
+        or my_staff.role.role_name in DOCUMENT_MANAGER_ROLES
+    )
+
+
 @login_required(login_url='staff_login')
 def staff_documents(request, staff_id):
     """View documents for a specific staff member"""
     staff = get_object_or_404(Staff, id=staff_id)
+
+    if not _can_access_staff_documents(request, staff):
+        raise PermissionDenied
 
     documents = StaffDocument.objects.filter(staff=staff).order_by('-uploaded_at')
 
@@ -1505,6 +1571,10 @@ def delete_document(request, doc_id):
     import os
 
     doc = get_object_or_404(StaffDocument, id=doc_id)
+
+    if not _can_access_staff_documents(request, doc.staff):
+        raise PermissionDenied
+
     staff_id = doc.staff.id
 
     # Get file name before deleting
@@ -1524,6 +1594,12 @@ def delete_document(request, doc_id):
 def update_document_status(request, doc_id):
     """Update document verification status"""
     doc = get_object_or_404(StaffDocument, id=doc_id)
+
+    # verifying / rejecting a document is a manager action, never the owner's
+    my_staff = getattr(request.user, 'staff_profile', None)
+    if not my_staff or not my_staff.role or my_staff.role.role_name not in DOCUMENT_MANAGER_ROLES:
+        raise PermissionDenied
+
     if request.method == 'POST':
         new_status = request.POST.get('status')
         if new_status in ['pending', 'verified', 'rejected']:
@@ -2386,34 +2462,43 @@ def staff_dashboard(request):
     # BATCH DASHBOARD
     # ================================
 
-    total_batches = Batch.objects.count()
+    # Same Batch records the Admission / Batches section works with, classified
+    # by dates + status (the same rule as Batch.display_status), so a batch
+    # whose start date has arrived is Ongoing, a future one is Upcoming, and
+    # one marked Completed (or past its end date) is Completed straight away.
+    # Cancelled batches are not counted in any bucket.
+    dash_batches = Batch.objects.exclude(status='Cancelled')
 
-    ongoing_batches = Batch.objects.filter(
-        status='Ongoing'
-    ).count()
+    ongoing_batches = dash_batches.filter(ongoing_batch_q()).count()
+    upcoming_batches = dash_batches.filter(upcoming_batch_q()).count()
+    completed_batches = dash_batches.filter(completed_batch_q()).count()
 
-    upcoming_batches = Batch.objects.filter(
-        status='Upcoming'
-    ).count()
-
-    completed_batches = Batch.objects.filter(
-        status='Completed'
-    ).count()
+    # Total = the three buckets, so the chips always add up.
+    total_batches = ongoing_batches + upcoming_batches + completed_batches
 
     # Batch strength (Requirement 02): registered students / strength total.
     # The strength total is dynamic - it changes with every registration,
     # transfer or removal (3/30 -> 4/31) - it is not a fixed 30.
+    # Only the five most recently added batches are listed.
     batch_summary = add_strength_total(
-        Batch.objects.select_related(
+        dash_batches.select_related(
             'course',
             'trainer'
         ).annotate(
             enrolled_students=Count('enrollments')
         ).order_by(
-            '-enrolled_students',
-            'batch_name'
-        )
+            '-created_at',
+            '-id'
+        )[:5]
     )
+
+    for b in batch_summary:
+        if b.status == 'Completed' or (b.end_date and b.end_date < timezone.localdate()):
+            b.dash_status = 'Completed'
+        elif b.start_date and b.start_date > timezone.localdate():
+            b.dash_status = 'Upcoming'
+        else:
+            b.dash_status = 'Ongoing'
 
     # ================================
     # CONTEXT

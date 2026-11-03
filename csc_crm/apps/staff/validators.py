@@ -73,3 +73,44 @@ def strip_country_code(value):
     if value and value.startswith('+91') and len(value) == 13:
         return value[3:]
     return value
+
+
+# ---------------------------------------------------------------------------
+# NAME RULE: letters only (single spaces between words), at most 20 characters.
+# Used by Staff, Student and Lead name fields so the rule is identical
+# everywhere.  The JS side mirrors it with maxlength="20" + a letters-only filter.
+# ---------------------------------------------------------------------------
+NAME_MAX_LENGTH = 20
+NAME_REGEX = re.compile(r'^[A-Za-z]+(?: [A-Za-z]+)*$')
+MSG_NAME_LETTERS = "Name must contain letters only (no numbers or symbols)."
+MSG_NAME_LENGTH = "Name must be 20 characters or fewer."
+
+
+def get_name_error(value):
+    """Return an error message for an invalid name, else None."""
+    value = (value or '').strip()
+
+    if not value:
+        return "Name is required."
+
+    if len(value) > NAME_MAX_LENGTH:
+        return MSG_NAME_LENGTH
+
+    if not NAME_REGEX.match(value):
+        return MSG_NAME_LETTERS
+
+    return None
+
+
+def validate_person_name(value):
+    """Django validator - usable in ``validators=[...]`` on model/form fields."""
+    error = get_name_error(value)
+    if error:
+        raise ValidationError(error, code='invalid_name')
+
+
+def clean_person_name(value):
+    """Helper for ``clean_<field>`` methods: returns the stripped, valid name."""
+    value = (value or '').strip()
+    validate_person_name(value)
+    return value

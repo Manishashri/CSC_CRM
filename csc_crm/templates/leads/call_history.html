@@ -1,4 +1,10 @@
 {% extends 'leads/base.html' %}
+{% load static %}
+
+{% block extra_css %}
+{# Loaded after the other stylesheets: pipeline_view.css also defines .card-header / .card-link and was overriding call_log.css #}
+<link rel="stylesheet" href="{% static 'css/call_log.css' %}">
+{% endblock %}
 
 {% block content %}
 <div class="back-header">

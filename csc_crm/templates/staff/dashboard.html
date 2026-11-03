@@ -160,7 +160,7 @@
                 <i class="fa-solid fa-user-xmark"></i>
             </div>
             <div class="dash-stat-body">
-                <span>Long-Absent</span>
+                <span>Absent</span>
                 <h2>{{ trainer_long_absent_students }}</h2>
                 <small>Absent {{ LONG_ABSENT_DAYS }}+ days in a row</small>
             </div>
@@ -583,13 +583,13 @@
                 <ul class="dash-legend">
                     <li><i class="dash-dot" style="background:#22c55e;"></i>Active <b>{{ active_students }}</b><small>({{ active_students_pct|default:0 }}%)</small></li>
                     <li><i class="dash-dot" style="background:#2563eb;"></i>Completed <b>{{ completed_students }}</b><small>({{ completed_students_pct|default:0 }}%)</small></li>
-                    <li><i class="dash-dot" style="background:#ef4444;"></i>Long-Absent <b>{{ long_absent_students }}</b><small>({{ long_absent_students_pct|default:0 }}%)</small></li>
+                    <li><i class="dash-dot" style="background:#ef4444;"></i>Absent <b>{{ long_absent_students }}</b><small>({{ long_absent_students_pct|default:0 }}%)</small></li>
                     <li class="dash-legend-total">Total Students <b>{{ total_students }}</b></li>
                 </ul>
 
                 {% if long_absent_list %}
                 <div class="dash-longabsent-list" style="margin-top:10px; font-size:12px;">
-                    <strong>Long-Absent students</strong>
+                    <strong>Absent students</strong>
                     <ul style="margin:6px 0 0 16px; padding:0;">
                         {% for item in long_absent_list %}
                         <li>{{ item.name }} <small>({{ item.batch }} &bull; {{ item.days }} days)</small></li>
@@ -633,7 +633,7 @@
                 <ul class="dash-legend">
                     <li><i class="dash-dot" style="background:#22c55e;"></i>Active <b>{{ trainer_active_students }}</b><small>({{ trainer_active_students_pct|default:0 }}%)</small></li>
                     <li><i class="dash-dot" style="background:#2563eb;"></i>Completed <b>{{ trainer_completed_students }}</b><small>({{ trainer_completed_students_pct|default:0 }}%)</small></li>
-                    <li><i class="dash-dot" style="background:#ef4444;"></i>Long-Absent <b>{{ trainer_long_absent_students }}</b><small>({{ trainer_long_absent_students_pct|default:0 }}%)</small></li>
+                    <li><i class="dash-dot" style="background:#ef4444;"></i>Absent <b>{{ trainer_long_absent_students }}</b><small>({{ trainer_long_absent_students_pct|default:0 }}%)</small></li>
                     <li class="dash-legend-total">Total Students <b>{{ trainer_total_students }}</b></li>
                 </ul>
 
@@ -844,7 +844,11 @@
                 <div class="dash-person-item">
 
                     <div class="dash-person-avatar">
+                        {% if staff.profile_photo %}
+                        <img src="{{ staff.profile_photo.url }}" alt="{{ staff.first_name }} {{ staff.last_name }}">
+                        {% else %}
                         {{ staff.first_name|slice:":1" }}{{ staff.last_name|slice:":1" }}
+                        {% endif %}
                     </div>
 
                     <div class="dash-person-body">
@@ -973,7 +977,11 @@
                 <div class="dash-person-item">
 
                     <div class="dash-person-avatar avatar-alt">
+                        {% if student.photo %}
+                        <img src="{{ student.photo.url }}" alt="{{ student.first_name }} {{ student.last_name }}">
+                        {% else %}
                         {{ student.first_name|slice:":1" }}{{ student.last_name|slice:":1" }}
+                        {% endif %}
                     </div>
 
                     <div class="dash-person-body">
@@ -983,6 +991,14 @@
                             <span><i class="fa-solid fa-envelope"></i> {{ student.email }}</span>
                         </div>
                     </div>
+
+                    {% if student.pending_amount <= 0 %}
+                    <span class="dash-pay-badge pay-paid">Paid</span>
+                    {% elif student.total_paid > 0 %}
+                    <span class="dash-pay-badge pay-partial">Partial</span>
+                    {% else %}
+                    <span class="dash-pay-badge pay-pending">Pending</span>
+                    {% endif %}
 
                 </div>
                 {% empty %}
@@ -1009,7 +1025,11 @@
                 <div class="dash-person-item">
 
                     <div class="dash-person-avatar avatar-alt">
+                        {% if student.photo %}
+                        <img src="{{ student.photo.url }}" alt="{{ student.first_name }} {{ student.last_name }}">
+                        {% else %}
                         {{ student.first_name|slice:":1" }}{{ student.last_name|slice:":1" }}
+                        {% endif %}
                     </div>
 
                     <div class="dash-person-body">
@@ -1019,6 +1039,14 @@
                             <span><i class="fa-solid fa-envelope"></i> {{ student.email }}</span>
                         </div>
                     </div>
+
+                    {% if student.pending_amount <= 0 %}
+                    <span class="dash-pay-badge pay-paid">Paid</span>
+                    {% elif student.total_paid > 0 %}
+                    <span class="dash-pay-badge pay-partial">Partial</span>
+                    {% else %}
+                    <span class="dash-pay-badge pay-pending">Pending</span>
+                    {% endif %}
 
                 </div>
                 {% empty %}
@@ -1054,6 +1082,7 @@
                         <div>
                             <h5>{{ batch.batch_name }}</h5>
                             <span>{{ batch.course.course_name }}</span>
+                            <em class="dash-batch-status dash-batch-status-{{ batch.dash_status|lower }}">{{ batch.dash_status }}</em>
                         </div>
                         <strong>{{ batch.enrolled_students }}/{{ batch.strength_total }}</strong>
                     </div>

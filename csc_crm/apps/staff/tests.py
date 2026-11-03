@@ -434,6 +434,38 @@ class DashboardNumbersTests(TestCase):
         batch.refresh_from_db()
         self.assertEqual(batch.max_students, 30)
 
+    # ---- Dashboard Batch Strength: Ongoing / Upcoming / Completed + latest five ----
+    def test_batch_strength_counts_and_latest_five(self):
+        course = make_course('Counts')
+        d = timedelta
+
+        running   = make_batch(course, 'Running',   self.today - d(days=10), self.today + d(days=30), status='Upcoming')
+        future    = make_batch(course, 'Future',    self.today + d(days=15), self.today + d(days=90), status='Ongoing')
+        finished  = make_batch(course, 'Finished',  self.today - d(days=60), self.today - d(days=5),  status='Ongoing')
+        marked    = make_batch(course, 'MarkedDone', self.today - d(days=10), self.today + d(days=30), status='Completed')
+        cancelled = make_batch(course, 'Cancelled', self.today - d(days=10), self.today + d(days=30), status='Ongoing')
+        Batch.objects.filter(pk=cancelled.pk).update(status='Cancelled', is_active=False)
+
+        ctx = self._dashboard()
+        # date-aware: stored status is ignored when the dates say otherwise
+        self.assertEqual(ctx['ongoing_batches'], 1)     # Running
+        self.assertEqual(ctx['upcoming_batches'], 1)    # Future
+        self.assertEqual(ctx['completed_batches'], 2)   # Finished + MarkedDone
+        self.assertEqual(ctx['total_batches'], 4)       # cancelled not counted
+
+        # status changed to Completed reflects at once
+        Batch.objects.filter(pk=running.pk).update(status='Completed')
+        ctx = self._dashboard()
+        self.assertEqual((ctx['ongoing_batches'], ctx['completed_batches']), (0, 3))
+
+        # only the five most recently added are listed, newest first
+        extra = [make_batch(course, f'Extra {i}', self.today - d(days=1), self.today + d(days=30)) for i in range(4)]
+        ctx = self._dashboard()
+        names = [b.batch_name for b in ctx['batch_summary']]
+        self.assertEqual(len(names), 5)
+        self.assertEqual(names, [b.batch_name for b in reversed(extra)] + ['MarkedDone'])
+        self.assertTrue(all(hasattr(b, 'dash_status') for b in ctx['batch_summary']))
+
     # ---- Requirement 04 ----
     def test_view_all_shows_only_that_staff_members_leads(self):
         a = make_staff('Sales Exec', 'Sales')
