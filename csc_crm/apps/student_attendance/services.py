@@ -1,35 +1,117 @@
 from .models import Attendance, AbsentTracker
 from csc_crm.apps.admissions.models import Enrollment
-from django.db.models import Q
 from django.utils import timezone
+
+# used when an enrollment has no attendance records yet
+NO_ATTENDANCE = {
+    'days': 0,
+    'present': 0,
+    'absent': 0,
+    'consecutive': 0,
+    'marked_today': False,
+}
+
+
+#================== ATTENDANCE SUMMARY FOR ALL ENROLLMENTS (ONE QUERY) ====================#
+def _get_attendance_summary(today=None):
+
+    summary = {}
+
+    records = (
+        Attendance.objects
+        .order_by('enrollment_id', '-attendance_date')
+        .values_list('enrollment_id', 'attendance_date', 'status')
+        .iterator(chunk_size=2000)
+    )
+
+    for enrollment_id, attendance_date, status in records:
+
+        data = summary.get(enrollment_id)
+
+        if data is None:
+            data = summary[enrollment_id] = {
+                'days': 0,
+                'present': 0,
+                'absent': 0,
+                'consecutive': 0,
+                'marked_today': False,
+                'last_date': None,
+                'streak_broken': False,
+            }
+
+        if data['last_date'] != attendance_date:
+            data['days'] += 1
+            data['last_date'] = attendance_date
+
+        if today and attendance_date == today:
+            data['marked_today'] = True
+
+        if status == 'Absent':
+            data['absent'] += 1
+            if not data['streak_broken']:
+                data['consecutive'] += 1
+        else:
+            data['streak_broken'] = True
+            if status in ('Present', 'Late'):
+                data['present'] += 1
+
+    return summary
+
 
 #======================= ABSENT TRACKER DATA (FOR ABSENT TRACKER PAGE) =====================#
 def get_absent_tracker_data():
 
-    students_data = []
+    today = timezone.now().date()
 
-    total_working_days = (Attendance.objects.values('attendance_date').distinct().count())
+    total_working_days = Attendance.objects.order_by().values('attendance_date').distinct().count()
 
-    enrollments = Enrollment.objects.select_related('admission__student', 'batch')
+    summary = _get_attendance_summary(today)
+
+    enrollments = list(
+        Enrollment.objects.select_related('admission__student', 'admission__course_name', 'batch')
+    )
+
+    trackers = {t.enrollment_id: t for t in AbsentTracker.objects.all()}
+
+    new_trackers = []
+    changed_trackers = []
+    rows = []
 
     for enrollment in enrollments:
 
-        attendance_records = (Attendance.objects.filter(enrollment=enrollment).order_by('-attendance_date'))
+        data = summary.get(enrollment.id, NO_ATTENDANCE)
 
-        total_absences = attendance_records.filter(status='Absent').count()
+        if data['marked_today']:
+            attendance_status = "Complete"
+        else:
+            attendance_status = "Incomplete"
 
-        present_count = attendance_records.filter(Q(status='Present') | Q(status='Late')).count()
+        tracker = trackers.get(enrollment.id)
 
-        consecutive_absences = 0
+        if tracker is None:
+            tracker = AbsentTracker(enrollment=enrollment, attendance_status=attendance_status)
+            new_trackers.append(tracker)
+        elif tracker.attendance_status != attendance_status:
+            tracker.attendance_status = attendance_status
+            changed_trackers.append(tracker)
 
-        for record in attendance_records:
-            if record.status == 'Absent':
-                consecutive_absences += 1
-            else:
-                break
+        rows.append((enrollment, tracker, data, attendance_status))
+
+    if new_trackers:
+        AbsentTracker.objects.bulk_create(new_trackers)
+
+    if changed_trackers:
+        AbsentTracker.objects.bulk_update(changed_trackers, ['attendance_status'])
+
+    students_data = []
+
+    for enrollment, tracker, data, attendance_status in rows:
+
+        total_absences = data['absent']
+        consecutive_absences = data['consecutive']
 
         if total_working_days > 0:
-            attendance_percentage = (present_count / total_working_days) * 100
+            attendance_percentage = (data['present'] / total_working_days) * 100
         else:
             attendance_percentage = 100
 
@@ -49,20 +131,6 @@ def get_absent_tracker_data():
         else:
             observation_note = "Normal Attendance"
 
-        today = timezone.now().date()
-
-        attendance_marked_today = attendance_records.filter(attendance_date=today).exists()
-
-        if attendance_marked_today:
-            attendance_status = "Complete"
-        else:
-            attendance_status = "Incomplete"
-
-        tracker, _ = AbsentTracker.objects.get_or_create(enrollment=enrollment)
-
-        tracker.attendance_status = attendance_status
-        tracker.save()
-
         students_data.append({
 
             "id": enrollment.id,
@@ -77,49 +145,35 @@ def get_absent_tracker_data():
             "alert_level": alert_level,
             "observation_note": observation_note,
             "attendance_status": attendance_status,
-            "admin_notes": tracker.admin_notes if tracker else "",
-            "tracker_id": tracker.id if tracker else None,
+            "admin_notes": tracker.admin_notes,
+            "tracker_id": tracker.id,
 
         })
 
     return students_data
+
 
 #========================== LOW ATTENDANCE DATA (FOR LOW ATTENDANCE ALERTS PAGE) ======================#
 def get_low_attendance_data():
 
     students_data = []
 
-    enrollments = Enrollment.objects.select_related('admission__student','batch')
+    summary = _get_attendance_summary()
+
+    enrollments = Enrollment.objects.select_related(
+        'admission__student', 'admission__course_name', 'batch'
+    )
 
     for enrollment in enrollments:
 
-        attendance_records = Attendance.objects.filter(enrollment=enrollment).order_by('-attendance_date')
+        data = summary.get(enrollment.id)
 
-        total_working_days = (attendance_records.values('attendance_date').distinct().count())
-        
-        if attendance_records.count() < 1:
+        # no attendance marked yet
+        if not data:
             continue
 
-        present_count = attendance_records.filter(Q(status='Present') | Q(status='Late')).count()
-
-        total_absences = attendance_records.filter(status='Absent').count()
-
-        # Consecutive Absences
-        consecutive_absences = 0
-
-        for record in attendance_records:
-
-            if record.status == 'Absent':
-                consecutive_absences += 1
-            else:
-                break
-
         # Attendance Percentage
-        if total_working_days > 0:
-            attendance_percentage = round((present_count / total_working_days) * 100,1)
-
-        else:
-            attendance_percentage = 100
+        attendance_percentage = round((data['present'] / data['days']) * 100, 1)
 
         # Alert Logic
         if attendance_percentage < 60:
@@ -135,8 +189,8 @@ def get_low_attendance_data():
             "course": enrollment.course,
             "batch": enrollment.batch,
             "attendance_percentage": attendance_percentage,
-            "total_absences": total_absences,
-            "consecutive_absences": consecutive_absences,
+            "total_absences": data['absent'],
+            "consecutive_absences": data['consecutive'],
             "alert_level": alert_level,
         })
 
