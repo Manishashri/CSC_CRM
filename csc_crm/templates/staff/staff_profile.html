@@ -157,7 +157,6 @@
 </div>
 
 <!--============================== BOTTOM: Documents + Recent Activity ======================== -->
-<!-- {% if request.user.staff_profile.role.role_name != "Marketing Lead" %} -->
 <div class="sp-bot-grid">
 
   <!-- Documents -->
@@ -166,20 +165,20 @@
       <i class="fa fa-file"></i> Documents
       <a href="{% url 'staff_documents' staff.id %}" class="sp-view-all-link">View All Documents</a>
     </div>
-    {% if documents %}
+    {% if recent_documents %}
       <div class="sp-docs-grid">
-        {% for doc in documents|slice:":4" %}
+        {% for doc in recent_documents %}
         <div class="sp-doc-card">
-          <div class="sp-doc-icon sp-doc-{{ doc.get_file_extension|lower }}">
-            <i class="fa fa-file-{% if doc.get_file_extension == 'PDF' %}pdf{% elif doc.get_file_extension == 'DOCX' or doc.get_file_extension == 'DOC' %}word{% else %}image{% endif %}"></i>
+          <div class="sp-doc-icon sp-doc-{{ doc.file_ext|lower }}">
+            <i class="fa {{ doc.icon_class }}"></i>
           </div>
           <div class="sp-doc-info">
-            <div class="sp-doc-name">{{ doc.document_type|default:"Document"|truncatechars:18 }}</div>
+            <div class="sp-doc-name" title="{{ doc.file_name }}">{{ doc.display_type|truncatechars:22 }}</div>
             <div class="sp-doc-date">Uploaded on {{ doc.uploaded_at|date:"d M Y" }}</div>
           </div>
           <div class="sp-doc-actions">
-            <a href="{{ doc.file.url }}" target="_blank" class="sp-doc-btn">View</a>
-            <a href="{{ doc.file.url }}" download class="sp-doc-btn">Download</a>
+            <a href="{% url 'view_document' doc.id %}" target="_blank" rel="noopener" class="sp-doc-btn"><i class="fa fa-eye"></i> View</a>
+            <a href="{% url 'view_document' doc.id %}?download=1" class="sp-doc-btn"><i class="fa fa-download"></i> Download</a>
           </div>
         </div>
         {% endfor %}
@@ -194,7 +193,6 @@
   <div class="sp-section">
     <div class="sp-sec-head">
       <i class="fa fa-clock-rotate-left"></i> Recent Activity
-      {% comment %} <a href="#" class="sp-view-all-link">View All Activity</a> {% endcomment %}
     </div>
     <div class="sp-activity-list">
       {% for item in activity_feed %}
@@ -210,10 +208,14 @@
       <div class="sp-empty"><i class="fa fa-clock" style="margin-right:6px;color:#d1d5db;"></i>No recent activity found.</div>
       {% endfor %}
     </div>
+    <div class="sp-act-footer">
+      <a href="{% url 'staff_activity_history' staff.id %}" class="sp-act-history-btn">
+        <i class="fa fa-clock-rotate-left"></i> View Recent Activity History
+      </a>
+    </div>
   </div>
 
 </div>
-<!-- {% endif %} -->
 <!-- ============================= EDIT MODAL ================================= -->
 
 <div class="sp-modal-overlay" id="editModal">

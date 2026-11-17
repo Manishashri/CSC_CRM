@@ -6,7 +6,7 @@
 <div class="over-box-recent">
 
     <div class="over-box-head">
-        <h2>Leads assigned to {{ staff.full_name }}</h2>
+        <h2>{% if staff.profile_photo %}<img src="{{ staff.profile_photo.url }}" alt="{{ staff.first_name }}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px;">{% endif %}Leads assigned to {{ staff.full_name }}</h2>
         <a href="{% url 'overview' staff.id %}" class="over-viewall-btn">Back to Staff Overview</a>
     </div>
 

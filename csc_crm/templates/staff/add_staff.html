@@ -138,10 +138,21 @@
                             <i class="fa-solid fa-lock"></i>
                         </div>
 
+                        <!-- Password strength indicator -->
+                        <div class="pw-strength" id="pwStrength" data-level="0">
+                            <div class="pw-strength-track">
+                                <div class="pw-strength-bar" id="pwStrengthBar"></div>
+                            </div>
+                            <span class="pw-strength-label" id="pwStrengthLabel">Enter a password</span>
+                           
+                        </div>
+
                         {% if form.password.errors %}
+                            {% for err in form.password.errors %}
                             <span class="form-error">
-                                {{ form.password.errors.0 }}
+                                {{ err }}
                             </span>
+                            {% endfor %}
                         {% else %}
                             <span
                                 class="form-error"

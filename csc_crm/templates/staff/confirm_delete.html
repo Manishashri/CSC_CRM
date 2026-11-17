@@ -16,7 +16,7 @@
                     <div class="confirmation-icon">⚠</div>
                     <p class="confirmation-message">
                         Are you sure you want to terminate
-                        <strong>{{ staff.first_name }} {{ staff.last_name }}</strong>
+                        {% if staff.profile_photo %}<img src="{{ staff.profile_photo.url }}" alt="{{ staff.first_name }}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px;">{% endif %}<strong>{{ staff.first_name }} {{ staff.last_name }}</strong>
                     </p>
                     <p class="confirmation-subtext">
                         Employee ID: {{ staff.employee_id }}

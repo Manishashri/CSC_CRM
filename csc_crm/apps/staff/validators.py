@@ -114,3 +114,54 @@ def clean_person_name(value):
     value = (value or '').strip()
     validate_person_name(value)
     return value
+
+
+# ---------------------------------------------------------------------------
+# STAFF PASSWORD RULE (Add Staff)
+#   * starts with a CAPITAL letter
+#   * contains letters (at least one lowercase letter besides the capital)
+#   * contains at least one special character
+#   * ends with a number
+#   * 8 - 20 characters
+# The JS side (add_staff.js) mirrors these checks one-to-one for the live
+# strength bar; keep both in sync.
+# ---------------------------------------------------------------------------
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_LENGTH = 20
+PASSWORD_SPECIAL_REGEX = re.compile(r'[^A-Za-z0-9\s]')
+
+MSG_PASSWORD_START = "Password must start with a capital letter."
+MSG_PASSWORD_LETTERS = "Password must contain lowercase letters."
+MSG_PASSWORD_SPECIAL = "Password must contain at least one special character."
+MSG_PASSWORD_END = "Password must end with a number."
+MSG_PASSWORD_LENGTH = "Password must be 8 to 20 characters long."
+
+
+def get_password_errors(value):
+    """Return a list of every rule the password breaks (empty list = strong)."""
+    value = value or ''
+    errors = []
+
+    if not (PASSWORD_MIN_LENGTH <= len(value) <= PASSWORD_MAX_LENGTH):
+        errors.append(MSG_PASSWORD_LENGTH)
+
+    if not (value[:1].isascii() and value[:1].isupper() and value[:1].isalpha()):
+        errors.append(MSG_PASSWORD_START)
+
+    if not re.search(r'[a-z]', value):
+        errors.append(MSG_PASSWORD_LETTERS)
+
+    if not PASSWORD_SPECIAL_REGEX.search(value):
+        errors.append(MSG_PASSWORD_SPECIAL)
+
+    if not (value[-1:].isascii() and value[-1:].isdigit()):
+        errors.append(MSG_PASSWORD_END)
+
+    return errors
+
+
+def validate_staff_password(value):
+    """Django validator for the Add Staff password."""
+    errors = get_password_errors(value)
+    if errors:
+        raise ValidationError(errors, code='weak_password')

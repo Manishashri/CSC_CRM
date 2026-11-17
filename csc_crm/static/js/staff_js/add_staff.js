@@ -591,6 +591,57 @@ document.addEventListener('DOMContentLoaded', () => {
     passwordInput.setAttribute('maxlength', '20');
     confirmPasswordInput.setAttribute('maxlength', '20');
 
+    // ---- strong password rules (mirror of apps/staff/validators.py) ----
+    const strengthBox   = document.getElementById('pwStrength');
+    const strengthBar   = document.getElementById('pwStrengthBar');
+    const strengthLabel = document.getElementById('pwStrengthLabel');
+    const ruleItems     = document.querySelectorAll('#pwRules li');
+
+    function checkPasswordRules(pw) {
+        return {
+            length:  pw.length >= 8 && pw.length <= 20,
+            start:   /^[A-Z]/.test(pw),
+            letters: /[a-z]/.test(pw),
+            special: /[^A-Za-z0-9\s]/.test(pw),
+            end:     /[0-9]$/.test(pw)
+        };
+    }
+
+    // red = 1-2 rules met, yellow = 3-4, green = all 5
+    function updateStrengthIndicator() {
+        if (!strengthBox) return;
+
+        const rules = checkPasswordRules(passwordInput.value);
+        const metCount = Object.values(rules).filter(Boolean).length;
+        const total = Object.keys(rules).length;
+
+        ruleItems.forEach(li => {
+            li.classList.toggle('met', !!rules[li.dataset.rule]);
+        });
+
+        let level = '';
+        let text = 'Enter a password';
+
+        if (passwordInput.value === '' || metCount === 0) {
+            level = '0';
+        } else if (metCount < 3) {
+            level = 'red';
+            text = 'Weak';
+        } else if (metCount < total) {
+            level = 'yellow';
+            text = 'Medium';
+        } else {
+            level = 'green';
+            text = 'Strong';
+        }
+
+        strengthBox.dataset.level = level;
+        strengthBar.style.width = passwordInput.value === ''
+            ? '0%'
+            : Math.round((metCount / total) * 100) + '%';
+        strengthLabel.textContent = text;
+    }
+
     function validatePassword() {
 
         if (passwordInput.value.length > 20) {
@@ -598,6 +649,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const password = passwordInput.value;
+
+        updateStrengthIndicator();
 
         if (password === '') {
             if (passwordError)
@@ -610,6 +663,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (password.length > 20) {
             if (passwordError)
                 passwordError.textContent = 'Password cannot exceed 20 characters.';
+
+            passwordInput.classList.add('error-input');
+            return false;
+        }
+
+        const rules = checkPasswordRules(password);
+
+        if (!Object.values(rules).every(Boolean)) {
+            if (passwordError)
+                passwordError.textContent =
+                    'Password must start with a capital letter, contain letters and a special character, and end with a number (8-20 characters).';
 
             passwordInput.classList.add('error-input');
             return false;

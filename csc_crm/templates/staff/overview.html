@@ -189,7 +189,7 @@
 
 <!-- =====================    Attendance TOP CARDS =========================-->
 
-{% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Content Creator" or staff.role.role_name == "HR" or staff.role.role_name == "Trainer" or staff.role.role_name == "Developer" %}
+{% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Marketing Lead" or staff.role.role_name == "Content Creator" or staff.role.role_name == "HR" or staff.role.role_name == "Trainer" or staff.role.role_name == "Developer" %}
 <div class="top-cards-over">
 
     <div class="att-card-over att-blue-over">
@@ -232,7 +232,7 @@
 
 <!-- ======================== ATTENDANCE (moved to top, restyled) ============================= -->
 
-{% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Content Creator" or staff.role.role_name == "HR" or staff.role.role_name == "Trainer" or staff.role.role_name == "Developer" %}
+{% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Marketing Lead" or staff.role.role_name == "Content Creator" or staff.role.role_name == "HR" or staff.role.role_name == "Trainer" or staff.role.role_name == "Developer" %}
 <div class="over-attendance-card">
 
     <div class="over-attendance-card-head">
@@ -294,7 +294,7 @@
 
 <!-- ================================ ATTENDANCE OVERVIEW  ================================== -->
 
- {% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Content Creator" or staff.role.role_name == "HR" or staff.role.role_name == "Trainer" or staff.role.role_name == "Developer" %}
+ {% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Marketing Lead" or staff.role.role_name == "Content Creator" or staff.role.role_name == "HR" or staff.role.role_name == "Trainer" or staff.role.role_name == "Developer" %}
 <div class="over-att-percentage-card">
 
     <div class="over-att-header">
@@ -357,8 +357,17 @@
 
     <!-- ===============================  Revenue  ================================== -->
     
-    {% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Content Creator" %}
+    {% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Marketing Lead" or staff.role.role_name == "Content Creator" %}
 
+    {% if uses_lead_capture %}
+    <div class="over-card" id="revenue-kpi">
+        <div class="over-card-icon purple">
+            <i class="fa fa-bullseye"></i>
+        </div>
+        <h3>Targets Completed</h3>
+        <h2>{{ targets_completed }}/{{ targets_total }}</h2>
+    </div>
+    {% else %}
     <div class="over-card" id="revenue-kpi">
         <div class="over-card-icon purple">
             <i class="fa fa-indian-rupee-sign"></i>
@@ -366,13 +375,14 @@
         <h3>Revenue</h3>
         <h2>₹{{ completed_amount }}</h2>
     </div>
+    {% endif %}
 
     {% endif %}
 
 
     <!-- ================================ Present Today  ======================== ========== -->
    
-    {% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Content Creator" %}
+    {% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Marketing Lead" or staff.role.role_name == "Content Creator" %}
 
     <div class="over-card" id="present-kpi">
         <div class="over-card-icon cyan">
@@ -429,7 +439,7 @@
 
 <!--======================================= PERFORMANCE SECTION ==================================-->
 
-{% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Content Creator" %}
+{% if staff.role.role_name == "Sales Exec" or staff.role.role_name == "Sales Exec Lead" or staff.role.role_name == "Manager" or staff.role.role_name == "Digital Marketing" or staff.role.role_name == "Marketing Lead" or staff.role.role_name == "Content Creator" %}
 
     
 <div class="over-performance-grid">
@@ -455,7 +465,7 @@
 
     <div class="over-chart-area">
 
-    <svg viewBox="-30 90 730 280" id="performance-svg">
+    <svg viewBox="-30 90 730 280" id="performance-svg" data-unit="{% if uses_lead_capture %}leads{% else %}rupees{% endif %}">
 
         <defs>
             <linearGradient id="gradientBlue" x1="0" y1="0" x2="0" y2="1">
@@ -539,18 +549,26 @@
 
         <div class="over-target-section">
 
-            <h4>Monthly Target Progress</h4>
+            <h4>Monthly Target Progress{% if uses_lead_capture %} (Lead Capture){% endif %}</h4>
 
             <div class="over-target-flex">
 
                 <div class="over-chart-z1">
                     <p>Total Target</p>
+                    {% if uses_lead_capture %}
+                    <h3>{{ performance_target }} leads</h3>
+                    {% else %}
                     <h3>₹{{ staff.monthly_target }}</h3>
+                    {% endif %}
                 </div>
 
                 <div class="over-chart-z2">
                     <p>Completed</p>
+                    {% if uses_lead_capture %}
+                    <h3>{{ completed_amount }} leads</h3>
+                    {% else %}
                     <h3>₹{{ completed_amount }}</h3>
+                    {% endif %}
                 </div>
 
                 <div class="over-chart-z3">

@@ -33,11 +33,13 @@ urlpatterns = [
 
     # DOCUMENT URLS
     path('<int:staff_id>/documents/', staff_documents, name='staff_documents'),
+    path('documents/<int:doc_id>/view/', view_document, name='view_document'),
     path('documents/<int:doc_id>/delete/', delete_document, name='delete_document'),
     path('documents/<int:doc_id>/status/', update_document_status, name='update_document_status'),
 
     
     # MY PROFILE
     path('<int:staff_id>/profile/', staff_profile, name='staff_profile'),
+    path('<int:staff_id>/activity/', staff_activity_history, name='staff_activity_history'),
     
 ]

@@ -2,6 +2,7 @@ from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils import timezone
 from django.conf import settings
+import os
 import uuid
 from cloudinary.models import CloudinaryField
 from .validators import validate_indian_mobile
@@ -214,8 +215,82 @@ class StaffDocument(models.Model):
         ordering = ['-uploaded_at']
 
     def __str__(self):
-        return f"{self.staff.full_name()} - {self.document.name}"
-    
+        return f"{self.staff.full_name()} - {self.file_name}"
+
+    # ---- display helpers (plain Python, no DB columns, so no migration) ----
+    # The staff profile / documents templates used doc.file, doc.document_type and
+    # doc.get_file_extension, none of which exist on this model, so the document
+    # container rendered blank values and broken links. These helpers give every
+    # template one safe place to read them.
+
+    @property
+    def resource(self):
+        """
+        The stored file as a CloudinaryResource. Rows loaded from the database
+        already are one; a freshly assigned plain string (e.g. right after
+        create()) is converted so every helper below behaves the same way.
+        """
+        res = self.document
+        if isinstance(res, str) and res:
+            res = self._meta.get_field('document').to_python(res)
+        return res
+
+    @property
+    def file(self):
+        """Backward-compatible alias for older templates (doc.file.url)."""
+        return self.resource
+
+    @property
+    def file_ext(self):
+        """Upper-case extension such as PDF / PNG / DOCX ('' when unknown)."""
+        res = self.resource
+        fmt = getattr(res, 'format', None)
+        if fmt and isinstance(fmt, str):
+            return fmt.upper()
+        name = getattr(res, 'public_id', None) or ''
+        return os.path.splitext(name)[1].lstrip('.').upper()
+
+    @property
+    def file_name(self):
+        """Readable file name (e.g. euvycrun542m.pdf); never raises."""
+        res = self.resource
+        if not res:
+            return 'Document'
+        public_id = getattr(res, 'public_id', None) or ''
+        base = os.path.basename(public_id)
+        ext = self.file_ext.lower()
+        if ext and not base.lower().endswith('.' + ext):
+            base = f"{base}.{ext}"
+        return base or 'Document'
+
+    @property
+    def display_type(self):
+        """Friendly label guessed from the file name (Aadhaar Card, Resume, ...)."""
+        stem = os.path.splitext(self.file_name)[0].lower()
+        for keys, label in (
+            (('aadhaar', 'aadhar', 'uid'), 'Aadhaar Card'),
+            (('pancard', 'pan_', '_pan', 'pan-', '-pan'), 'PAN Card'),
+            (('passport',), 'Passport'),
+            (('resume', 'cv'), 'Resume'),
+            (('offer', 'appointment'), 'Offer Letter'),
+            (('certificate', 'cert', 'degree', 'diploma'), 'Certificate'),
+        ):
+            if any(k in stem for k in keys):
+                return label
+        ext = self.file_ext
+        return {'PDF': 'PDF Document', 'DOC': 'Word Document', 'DOCX': 'Word Document'}.get(
+            ext, 'Image' if ext in ('JPG', 'JPEG', 'PNG', 'GIF', 'WEBP') else 'Document'
+        )
+
+    @property
+    def icon_class(self):
+        ext = self.file_ext
+        if ext == 'PDF':
+            return 'fa-file-pdf'
+        if ext in ('DOC', 'DOCX'):
+            return 'fa-file-word'
+        return 'fa-file-image'
+
 # ===== Overview =====
 
 # Lead

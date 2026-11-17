@@ -893,7 +893,7 @@
                         <h5>{{ lead.lead_name }}</h5>
                         <div class="dash-person-meta">
                             <span><i class="fa-solid fa-book"></i> {{ lead.get_course_interested_display }}</span>
-                            <span><i class="fa-solid fa-user"></i> {{ lead.assigned_to.full_name|default:"Unassigned" }}</span>
+                            <span>{% if lead.assigned_to.profile_photo %}<img src="{{ lead.assigned_to.profile_photo.url }}" alt="{{ lead.assigned_to.full_name }}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;vertical-align:middle;">{% else %}<i class="fa-solid fa-user"></i>{% endif %} {{ lead.assigned_to.full_name|default:"Unassigned" }}</span>
                             <span><i class="fa-solid fa-calendar-days"></i> {{ lead.created_at|date:"d M Y" }}</span>
                         </div>
                     </div>
@@ -928,7 +928,7 @@
                         <h5>{{ lead.lead_name }}</h5>
                         <div class="dash-person-meta">
                             <span><i class="fa-solid fa-book"></i> {{ lead.get_course_interested_display }}</span>
-                            <span><i class="fa-solid fa-user"></i> {{ lead.assigned_to.full_name|default:"Unassigned" }}</span>
+                            <span>{% if lead.assigned_to.profile_photo %}<img src="{{ lead.assigned_to.profile_photo.url }}" alt="{{ lead.assigned_to.full_name }}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;vertical-align:middle;">{% else %}<i class="fa-solid fa-user"></i>{% endif %} {{ lead.assigned_to.full_name|default:"Unassigned" }}</span>
                             <span><i class="fa-solid fa-calendar-days"></i> {{ lead.created_at|date:"d M Y" }}</span>
                         </div>
                     </div>

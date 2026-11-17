@@ -17,6 +17,21 @@ document.addEventListener("DOMContentLoaded", function () {
         return;
     }
 
+    // Digital Marketing / Marketing Lead charts show completed Lead Capture
+    // Target leads (plain numbers); every other role shows revenue in Rs.
+    const svgEl = document.getElementById("performance-svg");
+    const isLeads = !!svgEl && svgEl.dataset.unit === "leads";
+
+    function formatAmount(v) {
+        return isLeads
+            ? `${v.toLocaleString('en-IN')} leads`
+            : `₹${v.toLocaleString('en-IN')}`;
+    }
+
+    function formatLabel(v) {
+        return isLeads ? `${v.toLocaleString('en-IN')}` : `₹${v.toLocaleString('en-IN')}`;
+    }
+
     const x = [50, 200, 350, 500, 650];
     const yTop = 120;
     const yBottom = 320;
@@ -26,7 +41,7 @@ document.addEventListener("DOMContentLoaded", function () {
     let maxValue = Math.max(...allValues, 0);
 
     function niceMax(val) {
-        if (val <= 0) return 100;
+        if (val <= 0) return isLeads ? 5 : 100;
         const magnitude = Math.pow(10, Math.floor(Math.log10(val)));
         const normalized = val / magnitude;
         let n;
@@ -38,6 +53,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     maxValue = niceMax(maxValue);
+    if (isLeads && maxValue < 5) maxValue = 5;
 
     function getY(value) {
         const safeValue = Math.max(0, Math.min(Number(value) || 0, maxValue));
@@ -94,7 +110,7 @@ document.addEventListener("DOMContentLoaded", function () {
             circle.setAttribute("class", `chart-dot ${dotClass}`);
 
             const title = document.createElementNS(ns, "title");
-            title.textContent = `₹${value.toLocaleString('en-IN')}`;
+            title.textContent = formatAmount(value);
             circle.appendChild(title);
 
             group.appendChild(circle);
@@ -104,7 +120,7 @@ document.addEventListener("DOMContentLoaded", function () {
             label.setAttribute("x", cx);
             label.setAttribute("y", labelAbove ? cy - 12 : cy + 22);
             label.setAttribute("class", `chart-value-label ${labelClass}`);
-            label.textContent = `₹${value.toLocaleString('en-IN')}`;
+            label.textContent = formatLabel(value);
             group.appendChild(label);
         });
     }

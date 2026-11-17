@@ -9,6 +9,7 @@ from django.db.models import Q, Avg, Count, F, FloatField, ExpressionWrapper
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
+from django.urls import reverse
 
 from datetime import datetime, time, timedelta
 from django.conf import settings
@@ -118,6 +119,70 @@ def get_weekly_performance(staff, year, month):
         amounts[week] += enrollment.admission.course_name.course_fee or 0
 
     return amounts
+
+
+# Roles whose Performance Overview is measured in Lead Capture Targets (leads),
+# not in revenue (Rs).  Same data logic for both roles.
+LEAD_CAPTURE_PERFORMANCE_ROLES = ['Digital Marketing', 'Marketing Lead']
+
+
+def get_lead_capture_performance(staff, year, month):
+    """
+    Performance of a Digital Marketing / Marketing Lead member for ONE month,
+    based ONLY on their COMPLETED Lead Capture Targets (Leads -> Lead Capture
+    Target).  A target that is still in progress or expired counts as 0 -
+    only targets with is_completed=True are "completed".
+
+    Returns
+        weeks      {1: leads, ... 5: leads}  completed-target leads, put in the
+                   week (1-7, 8-14, 15-21, 22-28, 29-end) of the completion date
+        target     total leads of the targets that belong to this month
+        completed  total leads of the targets completed in this month
+        percent    completed / target, max 100
+        targets_total / targets_completed   number of targets (for the KPI card)
+
+    A target belongs to the month when its date range overlaps the month, or
+    when it was completed in that month.
+    """
+    last_day = calendar.monthrange(year, month)[1]
+    month_start = datetime(year, month, 1).date()
+    month_end = datetime(year, month, last_day).date()
+
+    weeks = {week: 0 for week in range(1, 6)}
+
+    targets = LeadCaptureTarget.objects.filter(assigned_to=staff)
+
+    month_targets = targets.filter(
+        Q(start_date__lte=month_end, end_date__gte=month_start) |
+        Q(is_completed=True, completed_at__date__gte=month_start,
+          completed_at__date__lte=month_end)
+    ).distinct()
+
+    completed_targets = [
+        t for t in month_targets
+        if t.is_completed and t.completed_at
+        and month_start <= timezone.localtime(t.completed_at).date() <= month_end
+    ]
+
+    for t in completed_targets:
+        day = timezone.localtime(t.completed_at).day
+        weeks[min((day - 1) // 7 + 1, 5)] += t.target_count
+
+    target_total = sum(t.target_count for t in month_targets)
+    completed_total = sum(weeks.values())
+    percent = (
+        min(round((completed_total / target_total) * 100), 100)
+        if target_total > 0 else 0
+    )
+
+    return {
+        'weeks': weeks,
+        'target': target_total,
+        'completed': completed_total,
+        'percent': percent,
+        'targets_total': month_targets.count(),
+        'targets_completed': len(completed_targets),
+    }
 
 
 def get_student_overview(enrollments):
@@ -868,8 +933,21 @@ def overview(request, staff_id=None):
     else:
         last_year, last_month = today.year, today.month - 1
 
-    week_amounts = get_weekly_performance(staff, today.year, today.month)
-    week_amounts_last = get_weekly_performance(staff, last_year, last_month)
+    # Digital Marketing / Marketing Lead: performance = COMPLETED Lead Capture
+    # Targets (leads).  Every other role keeps the revenue-based calculation.
+    uses_lead_capture = bool(
+        staff.role and staff.role.role_name in LEAD_CAPTURE_PERFORMANCE_ROLES
+    )
+
+    if uses_lead_capture:
+        perf_this = get_lead_capture_performance(staff, today.year, today.month)
+        perf_last = get_lead_capture_performance(staff, last_year, last_month)
+        week_amounts = perf_this['weeks']
+        week_amounts_last = perf_last['weeks']
+    else:
+        perf_this = None
+        week_amounts = get_weekly_performance(staff, today.year, today.month)
+        week_amounts_last = get_weekly_performance(staff, last_year, last_month)
 
     week_data_this = [week_amounts.get(i, 0) for i in range(1, 6)]
     week_data_last = [week_amounts_last.get(i, 0) for i in range(1, 6)]
@@ -885,11 +963,15 @@ def overview(request, staff_id=None):
     recent_leads = leads.order_by("-created_at", "-id")[:5]
 
     # === TARGET PROGRESS ===
-    target_amount = float(staff.monthly_target or 0)
-    progress_percentage = (
-        round((completed_amount / target_amount) * 100) if target_amount > 0 else 0
-    )
-    progress_percentage = min(progress_percentage, 100)
+    if uses_lead_capture:
+        target_amount = perf_this['target']
+        progress_percentage = perf_this['percent']
+    else:
+        target_amount = float(staff.monthly_target or 0)
+        progress_percentage = (
+            round((completed_amount / target_amount) * 100) if target_amount > 0 else 0
+        )
+        progress_percentage = min(progress_percentage, 100)
 
     # === ATTENDANCE (this month - same numbers as the Attendance page) ===
     today_attendance = Attendance.objects.filter(
@@ -927,6 +1009,11 @@ def overview(request, staff_id=None):
         "converted_leads": converted_leads,
         "pending_leads": pending_leads,
         "recent_leads": recent_leads,
+
+        "uses_lead_capture": uses_lead_capture,
+        "performance_target": target_amount,
+        "targets_total": perf_this['targets_total'] if perf_this else 0,
+        "targets_completed": perf_this['targets_completed'] if perf_this else 0,
 
         "week_data_this": week_data_this,
         "week_data_last": week_data_last,
@@ -1608,6 +1695,147 @@ def update_document_status(request, doc_id):
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 return JsonResponse({'success': True, 'status': new_status})
     return redirect('staff_documents', staff_id=doc.staff.id)
+
+
+# ---------------------------------------------------------------------------
+# VIEW / DOWNLOAD A STAFF DOCUMENT
+# The View button used to link straight to the storage URL. For rows whose file
+# is missing from storage that URL answers 404 and the browser shows an empty
+# page. The file is now loaded on the server first, so the person either gets
+# the document or a clear message back on the page they came from.
+# ---------------------------------------------------------------------------
+DOCUMENT_MAX_BYTES = 25 * 1024 * 1024
+DOCUMENT_INLINE_EXTS = {'PDF', 'JPG', 'JPEG', 'PNG', 'GIF', 'WEBP'}
+DOCUMENT_CONTENT_TYPES = {
+    'PDF': 'application/pdf',
+    'JPG': 'image/jpeg', 'JPEG': 'image/jpeg', 'PNG': 'image/png',
+    'GIF': 'image/gif', 'WEBP': 'image/webp',
+    'DOC': 'application/msword',
+    'DOCX': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+}
+
+
+def _document_remote_urls(doc):
+    """Every storage URL worth trying for this document, best guess first."""
+    res = doc.resource
+    if not res:
+        return []
+
+    urls = []
+    try:
+        urls.append(res.url)
+    except Exception:
+        pass
+
+    public_id = getattr(res, 'public_id', None)
+    fmt = getattr(res, 'format', None)
+    if public_id:
+        import cloudinary.utils
+        variants = [(getattr(res, 'resource_type', None) or 'image', False),
+                    (getattr(res, 'resource_type', None) or 'image', True)]
+        # rows saved before Cloudinary do not record the resource type: try raw too
+        if (getattr(res, 'resource_type', None) or 'image') != 'raw':
+            variants.append(('raw', False))
+        for resource_type, signed in variants:
+            try:
+                url, _ = cloudinary.utils.cloudinary_url(
+                    f"{public_id}.{fmt}" if resource_type == 'raw' and fmt else public_id,
+                    resource_type=resource_type,
+                    type=getattr(res, 'type', None) or 'upload',
+                    format=None if resource_type == 'raw' else fmt,
+                    version=getattr(res, 'version', None),
+                    sign_url=signed,
+                    secure=True,
+                )
+                urls.append(url)
+            except Exception:
+                continue
+
+    seen, unique = set(), []
+    for url in urls:
+        if url and url not in seen:
+            seen.add(url)
+            unique.append(url)
+    return unique
+
+
+def _document_local_paths(doc):
+    """Local MEDIA_ROOT paths for files saved before the move to Cloudinary."""
+    res = doc.resource
+    public_id = getattr(res, 'public_id', None)
+    if not public_id:
+        return []
+    fmt = getattr(res, 'format', None)
+    name = f"{public_id}.{fmt}" if fmt else public_id
+    base = os.path.realpath(str(settings.MEDIA_ROOT))
+    path = os.path.realpath(os.path.join(base, name))
+    # never leave MEDIA_ROOT, whatever the stored name contains
+    return [path] if path.startswith(base + os.sep) else []
+
+
+def _fetch_document_bytes(url, timeout=12):
+    from urllib.request import Request, urlopen
+    request = Request(url, headers={'User-Agent': 'CSC-CRM/1.0'})
+    with urlopen(request, timeout=timeout) as response:
+        if getattr(response, 'status', 200) != 200:
+            return None
+        data = response.read(DOCUMENT_MAX_BYTES + 1)
+    if not data or len(data) > DOCUMENT_MAX_BYTES:
+        return None
+    return data
+
+
+def _load_document_bytes(doc):
+    """Return the document's bytes from local media or storage, else None."""
+    for path in _document_local_paths(doc):
+        if os.path.isfile(path):
+            with open(path, 'rb') as fh:
+                return fh.read()
+
+    for url in _document_remote_urls(doc):
+        try:
+            data = _fetch_document_bytes(url)
+        except Exception:
+            continue
+        if data:
+            return data
+    return None
+
+
+def _safe_back_url(request, fallback):
+    from django.utils.http import url_has_allowed_host_and_scheme
+    referer = request.META.get('HTTP_REFERER')
+    if referer and url_has_allowed_host_and_scheme(referer, allowed_hosts={request.get_host()}):
+        return referer
+    return fallback
+
+
+@login_required(login_url='staff_login')
+def view_document(request, doc_id):
+    """Open (or with ?download=1 download) one staff document."""
+    doc = get_object_or_404(StaffDocument.objects.select_related('staff'), id=doc_id)
+
+    if not _can_access_staff_documents(request, doc.staff):
+        raise PermissionDenied
+
+    data = _load_document_bytes(doc)
+    if data is None:
+        messages.error(
+            request,
+            f"'{doc.file_name}' could not be opened because the file is missing "
+            f"from storage. Please upload it again."
+        )
+        return redirect(_safe_back_url(request, reverse('staff_documents', args=[doc.staff_id])))
+
+    ext = doc.file_ext
+    content_type = DOCUMENT_CONTENT_TYPES.get(ext) or 'application/octet-stream'
+    as_attachment = request.GET.get('download') == '1' or ext not in DOCUMENT_INLINE_EXTS
+
+    response = HttpResponse(data, content_type=content_type)
+    safe_name = doc.file_name.replace('"', '')
+    response['Content-Disposition'] = f'{"attachment" if as_attachment else "inline"}; filename="{safe_name}"'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
 
     
 # ================================ Dashboard View ===================================
@@ -2738,78 +2966,15 @@ def staff_profile(request, staff_id):
     tasks_completed = Lead.objects.filter(staff=staff, status='converted').count()
     tasks_total = Lead.objects.filter(staff=staff).count()
 
-    # Documents uploaded for this staff
-    documents = StaffDocument.objects.filter(staff=staff)
+    # Documents uploaded for this staff: newest first, the card shows the latest 4
+    # (always at least the 2 most recent when that many exist)
+    documents = StaffDocument.objects.filter(staff=staff).order_by('-uploaded_at', '-id')
+    recent_documents = list(documents[:4])
 
-    # ── RECENT ACTIVITY FEED ──────────────────────────────────────────
-    from datetime import datetime as _dt
-    activity_feed = []
-
-    # 1) Check-ins: Attendance records where status is Present/Late and log_in exists
-    checkins = Attendance.objects.filter(
-        staff=staff,
-        status__in=['Present', 'Late'],
-        log_in__isnull=False
-    ).order_by('-log_in')[:10]
-    for att in checkins:
-        activity_feed.append({
-            'type': 'checkin',
-            'icon': 'fa-right-to-bracket',
-            'color': 'green',
-            'title': 'Checked In' if att.status == 'Present' else 'Checked In (Late)',
-            'detail': att.log_in.strftime('%d %b %Y, %I:%M %p'),
-            'timestamp': att.log_in,
-        })
-
-    # 2) Document uploads: each StaffDocument with filename as designation
-    for doc in documents.order_by('-uploaded_at')[:10]:
-
-        if doc.document:
-            raw_name = os.path.basename(doc.document.public_id)
-        else:
-            raw_name = "Document"
-
-        doc_label = raw_name.replace("_", " ").replace("-", " ").title()
-        activity_feed.append({
-            'type': 'document',
-            'icon': 'fa-file-arrow-up',
-            'color': 'blue',
-            'title': f'Uploaded {doc_label}',
-            'detail': doc.uploaded_at.strftime('%d %b %Y, %I:%M %p'),
-            'timestamp': doc.uploaded_at,
-        })
-
-    # 3) Profile updates: staff updated_at (if different from created_at)
-    if staff.updated_at and abs((staff.updated_at - staff.created_at).total_seconds()) > 60:
-        activity_feed.append({
-            'type': 'profile',
-            'icon': 'fa-user-pen',
-            'color': 'yellow',
-            'title': 'Profile Updated',
-            'detail': staff.updated_at.strftime('%d %b %Y, %I:%M %p'),
-            'timestamp': staff.updated_at,
-        })
-
-
-    # Sort all by timestamp descending, keep latest 10
-    activity_feed.sort(key=lambda x: x['timestamp'], reverse=True)
-    activity_feed = activity_feed[:10]
-
-    # Humanize timestamps
-    _now = timezone.now()
-    for item in activity_feed:
-        diff = _now - item['timestamp']
-        if diff.days == 0:
-            item['when'] = 'Today'
-        elif diff.days == 1:
-            item['when'] = 'Yesterday'
-        elif diff.days < 7:
-            item['when'] = f"{diff.days} Days Ago"
-        elif diff.days < 30:
-            item['when'] = f"{diff.days // 7} Week{'s' if diff.days // 7 > 1 else ''} Ago"
-        else:
-            item['when'] = item['timestamp'].strftime('%d %b %Y')
-    # ─────────────────────────────────────────────────────────────────
+    # Recent Activity card: the latest items (never fewer than 4 when that many
+    # exist). The full history lives on its own page, from the joining date to today.
+    all_activity = _build_staff_activity(staff)
+    activity_feed = all_activity[:RECENT_ACTIVITY_CARD_ITEMS]
     context = {
         'staff': staff,
         'form': form,
@@ -2819,9 +2984,127 @@ def staff_profile(request, staff_id):
         'tasks_completed': tasks_completed,
         'tasks_total': tasks_total,
         'documents': documents,
+        'recent_documents': recent_documents,
         'activity_feed': activity_feed,
+        'activity_total': len(all_activity),
     }
     return render(request, 'staff/staff_profile.html', context)
+
+
+
+# ======================= RECENT ACTIVITY (staff profile) =======================
+RECENT_ACTIVITY_CARD_ITEMS = 5      # card shows 5 items (minimum 4)
+
+
+def _humanize_when(moment, now):
+    diff = now - moment
+    if diff.days <= 0:
+        return 'Today'
+    if diff.days == 1:
+        return 'Yesterday'
+    if diff.days < 7:
+        return f"{diff.days} Days Ago"
+    if diff.days < 30:
+        weeks = diff.days // 7
+        return f"{weeks} Week{'s' if weeks > 1 else ''} Ago"
+    return timezone.localtime(moment).strftime('%d %b %Y')
+
+
+def _build_staff_activity(staff, since=None):
+    """
+    Every activity event of one staff member, newest first.
+
+    Sources: check-ins, check-outs, absent / leave days, document uploads,
+    leads added or converted, profile updates and the joining day itself.
+    `since` limits the list to events on/after that date (used for the history
+    page: joining date -> today).
+    """
+    events = []
+    fmt = '%d %b %Y, %I:%M %p'
+
+    def add(kind, icon, color, title, moment, detail=None):
+        events.append({
+            'type': kind, 'icon': icon, 'color': color, 'title': title,
+            'detail': detail or timezone.localtime(moment).strftime(fmt),
+            'timestamp': moment,
+        })
+
+    def aware_midday(day):
+        return timezone.make_aware(datetime.combine(day, time(12, 0)))
+
+    attendance = Attendance.objects.filter(staff=staff)
+    if since:
+        attendance = attendance.filter(date__gte=since)
+
+    for rec in attendance.order_by('-date'):
+        if rec.log_in and rec.status in ('Present', 'Late'):
+            add('checkin', 'fa-right-to-bracket', 'green',
+                'Checked In' if rec.status == 'Present' else 'Checked In (Late)', rec.log_in)
+        if rec.log_out:
+            add('checkout', 'fa-right-from-bracket', 'purple', 'Checked Out', rec.log_out)
+        if rec.status in ('Absent', 'Leave') and not rec.log_in:
+            add('absence', 'fa-user-clock', 'yellow',
+                'Marked Absent' if rec.status == 'Absent' else 'On Leave',
+                aware_midday(rec.date), detail=rec.date.strftime('%d %b %Y'))
+
+    for doc in StaffDocument.objects.filter(staff=staff):
+        if since and timezone.localtime(doc.uploaded_at).date() < since:
+            continue
+        add('document', 'fa-file-arrow-up', 'blue', f'Uploaded {doc.display_type}', doc.uploaded_at)
+
+    for lead in Lead.objects.filter(staff=staff):
+        if not since or timezone.localtime(lead.created_at).date() >= since:
+            add('lead', 'fa-user-plus', 'blue', f'Lead Added: {lead.name}', lead.created_at)
+        if lead.status == 'converted' and (
+            not since or timezone.localtime(lead.updated_at).date() >= since
+        ):
+            add('lead', 'fa-handshake', 'green', f'Lead Converted: {lead.name}', lead.updated_at)
+
+    if staff.updated_at and staff.created_at and \
+            abs((staff.updated_at - staff.created_at).total_seconds()) > 60:
+        if not since or timezone.localtime(staff.updated_at).date() >= since:
+            add('profile', 'fa-user-pen', 'yellow', 'Profile Updated', staff.updated_at)
+
+    if staff.date_of_joining and (not since or staff.date_of_joining >= since):
+        add('joined', 'fa-flag-checkered', 'purple', 'Joined CSC', aware_midday(staff.date_of_joining),
+            detail=staff.date_of_joining.strftime('%d %b %Y'))
+
+    events.sort(key=lambda e: e['timestamp'], reverse=True)
+
+    now = timezone.now()
+    for item in events:
+        item['when'] = _humanize_when(item['timestamp'], now)
+    return events
+
+
+@login_required(login_url='staff_login')
+def staff_activity_history(request, staff_id):
+    """Complete activity history: joining date -> today (same access as the profile)."""
+    staff = get_object_or_404(Staff, id=staff_id)
+
+    my_staff = getattr(request.user, 'staff_profile', None)
+    if not my_staff or my_staff.id != staff.id:
+        raise PermissionDenied
+
+    today = timezone.localdate()
+    start_date = staff.date_of_joining or today
+    events = _build_staff_activity(staff, since=start_date)
+
+    # group by local day so the page reads like a timeline
+    groups = []
+    for event in events:
+        day = timezone.localtime(event['timestamp']).date()
+        if not groups or groups[-1]['day'] != day:
+            groups.append({'day': day, 'items': []})
+        groups[-1]['items'].append(event)
+
+    return render(request, 'staff/activity_history.html', {
+        'staff': staff,
+        'groups': groups,
+        'total_events': len(events),
+        'start_date': start_date,
+        'end_date': today,
+    })
 
 
 # ================== STAFF-SCOPED LEAD LIST (Staff Overview -> Recent Leads -> View All) ==================

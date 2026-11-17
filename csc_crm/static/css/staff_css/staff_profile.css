@@ -272,3 +272,60 @@ input#profilePhotoInput { display: none; }
   .sp-docs-grid { grid-template-columns: 1fr; }
   .sp-form-grid { grid-template-columns: 1fr; }
 }
+
+/* =====================================================
+   DOCUMENT CARDS + RECENT ACTIVITY HISTORY
+   ===================================================== */
+
+/* document card: icon + text side by side, buttons underneath */
+.sp-doc-card { min-width: 0; }
+.sp-doc-info { min-width: 0; }
+.sp-doc-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-doc-jpg, .sp-doc-jpeg, .sp-doc-png, .sp-doc-gif, .sp-doc-webp { background:#d1fae5; color:#065f46; }
+.sp-doc-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 8px; }
+.sp-doc-btn i { font-size: 11px; }
+
+/* Recent Activity card: list + footer button */
+.sp-activity-list { padding: 6px 0; min-height: 120px; }
+.sp-act-body { min-width: 0; }
+.sp-act-footer {
+  padding: 14px 18px 16px;
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
+  display: flex; justify-content: center;
+}
+.sp-act-history-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; max-width: 320px;
+  padding: 10px 18px; border-radius: 9px;
+  background: #262170; color: #fff;
+  font-size: 13px; font-weight: 700; text-decoration: none;
+  border: 1px solid #262170; transition: .2s;
+}
+.sp-act-history-btn:hover { background: #fff; color: #262170; }
+
+/* history page */
+.sp-hist-count {
+  background: #eef2ff; color: #262170; border: 1px solid #dbe2ff;
+  border-radius: 12px; padding: 10px 18px;
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.sp-hist-count span { font-size: 20px; font-weight: 800; margin-right: 4px; }
+.sp-hist-wrap { padding: 0 26px 30px; max-width: 980px; }
+.sp-hist-day { margin-bottom: 22px; }
+.sp-hist-date {
+  display: flex; align-items: center; gap: 9px;
+  margin: 0 0 10px; padding: 0 4px;
+  font-size: 14px; font-weight: 800; color: #111827;
+}
+.sp-hist-date i { color: #262170; }
+.sp-hist-date small { margin-left: auto; font-size: 11px; font-weight: 600; color: #9ca3af; }
+.sp-hist-card {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+  overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+
+@media (max-width: 768px) {
+  .sp-hist-wrap { padding: 0 14px 24px; }
+  .sp-hist-count { padding: 8px 12px; }
+}

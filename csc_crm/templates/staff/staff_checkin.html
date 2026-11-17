@@ -43,7 +43,7 @@
 
     <div class="info-text">
         <small>Staff Name</small>
-        <strong>{{ staff.first_name }} {{ staff.last_name }}</strong>
+        {% if staff.profile_photo %}<img src="{{ staff.profile_photo.url }}" alt="{{ staff.first_name }}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px;">{% endif %}<strong>{{ staff.first_name }} {{ staff.last_name }}</strong>
     </div>
 
 </div>

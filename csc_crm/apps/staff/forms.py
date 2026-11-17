@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from .models import *
 from datetime import date
-from .validators import clean_indian_mobile, clean_person_name
+from .validators import clean_indian_mobile, clean_person_name, validate_staff_password
 
 class StaffForm(forms.ModelForm):
     """Form Adding/Editing Staff members"""
@@ -25,6 +25,12 @@ class StaffForm(forms.ModelForm):
             'autocomplete': 'new-password',
         })
     )
+
+    def clean_password(self):
+        """Add Staff: enforce the strong-password rule (see validators.py)."""
+        password = self.cleaned_data.get('password')
+        validate_staff_password(password)
+        return password
 
     class Meta:
         model = Staff
@@ -450,6 +456,11 @@ class EditStaffForm(StaffForm):
     class Meta(StaffForm.Meta):
         model = Staff
         fields = StaffForm.Meta.fields
+
+    def clean_password(self):
+        # The strong-password rule applies to Add Staff only; editing keeps
+        # its existing optional-password behaviour.
+        return self.cleaned_data.get('password')
 
     def clean(self):
         cleaned_data = super().clean()
