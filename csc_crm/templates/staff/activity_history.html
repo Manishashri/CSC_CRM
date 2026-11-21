@@ -20,7 +20,7 @@
 </div>
 
 <!-- ======================================== TIMELINE =========================================== -->
-<div class="sp-hist-wrap">
+<div class="sp-section sp-hist-wrap">
   {% for group in groups %}
   <section class="sp-hist-day">
     <h2 class="sp-hist-date">
@@ -31,7 +31,7 @@
       {% for item in group.items %}
       <div class="sp-activity-item sp-act-{{ item.color }}">
         <div class="sp-act-icon"><i class="fa {{ item.icon }}"></i></div>
-        <div class="sp-act-body">
+                <div class="sp-act-body">
           <div class="sp-act-title">{{ item.title }}</div>
           <div class="sp-act-sub">{{ item.detail }}</div>
         </div>

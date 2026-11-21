@@ -597,13 +597,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const strengthLabel = document.getElementById('pwStrengthLabel');
     const ruleItems     = document.querySelectorAll('#pwRules li');
 
-    function checkPasswordRules(pw) {
+        function checkPasswordRules(pw) {
         return {
             length:  pw.length >= 8 && pw.length <= 20,
-            start:   /^[A-Z]/.test(pw),
-            letters: /[a-z]/.test(pw),
-            special: /[^A-Za-z0-9\s]/.test(pw),
-            end:     /[0-9]$/.test(pw)
+            upper:   /[A-Z]/.test(pw),
+            lower:   /[a-z]/.test(pw),
+            number:  /[0-9]/.test(pw),
+            special: /[^A-Za-z0-9\s]/.test(pw)
         };
     }
 
@@ -673,8 +673,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!Object.values(rules).every(Boolean)) {
             if (passwordError)
                 passwordError.textContent =
-                    'Password must start with a capital letter, contain letters and a special character, and end with a number (8-20 characters).';
-
+                     'Use 8-20 characters with uppercase, lowercase, a number and a symbol.'
             passwordInput.classList.add('error-input');
             return false;
         }

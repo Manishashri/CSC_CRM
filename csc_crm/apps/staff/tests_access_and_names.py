@@ -258,3 +258,81 @@ class DashboardAndPreviewTests(TestCase):
         self.client.post(url, {'first_name': 'x' * 21, 'last_name': 'Ok'})
         s.refresh_from_db()
         self.assertEqual(s.first_name, 'Stu')
+
+@PLAIN_STATIC
+class SalesLeadOverviewAccessTests(TestCase):
+
+    def setUp(self):
+        self.lead = make_staff('Sales Exec Lead', 'Sales')
+        self.other_lead = make_staff('Sales Exec Lead', 'Sales')
+        self.sales_exec = make_staff('Sales Exec', 'Sales')
+        self.trainer = make_staff('Trainer', 'Technical')
+
+    def test_lead_opens_sales_team_overview(self):
+        login(self.client, self.lead)
+        for person in (self.lead, self.other_lead, self.sales_exec):
+            url = reverse('overview', args=[person.id])
+            self.assertEqual(self.client.get(url).status_code, 200, person.id)
+
+    def test_lead_cannot_open_other_department_overview(self):
+        login(self.client, self.lead)
+        url = reverse('overview', args=[self.trainer.id])
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_sales_exec_still_cannot_open_overview(self):
+        login(self.client, self.sales_exec)
+        url = reverse('overview', args=[self.lead.id])
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_lead_opens_sales_team_attendance(self):
+        login(self.client, self.lead)
+        for person in (self.lead, self.other_lead, self.sales_exec):
+            for name in ('attendance', 'export_attendance'):
+                url = reverse(name, args=[person.id])
+                self.assertEqual(self.client.get(url).status_code, 200, (name, person.id))
+
+    def test_lead_cannot_open_other_department_attendance(self):
+        login(self.client, self.lead)
+        for name in ('attendance', 'export_attendance'):
+            url = reverse(name, args=[self.trainer.id])
+            self.assertEqual(self.client.get(url).status_code, 403, name)
+
+
+@PLAIN_STATIC
+class MarketingLeadAccessTests(TestCase):
+
+    def setUp(self):
+        self.lead = make_staff('Marketing Lead', 'Marketing')
+        self.marketer = make_staff('Digital Marketing', 'Marketing')
+        self.sales_exec = make_staff('Sales Exec', 'Sales')
+
+    def test_lead_opens_marketing_team_pages(self):
+        login(self.client, self.lead)
+        for person in (self.lead, self.marketer):
+            for name in ('overview', 'attendance', 'export_attendance'):
+                url = reverse(name, args=[person.id])
+                self.assertEqual(self.client.get(url).status_code, 200, (name, person.id))
+
+    def test_lead_cannot_open_other_department(self):
+        login(self.client, self.lead)
+        for name in ('overview', 'attendance', 'export_attendance'):
+            url = reverse(name, args=[self.sales_exec.id])
+            self.assertEqual(self.client.get(url).status_code, 403, name)
+@PLAIN_STATIC
+class HrOverviewAccessTests(TestCase):
+
+    def setUp(self):
+        self.hr = make_staff('HR', 'Management')
+        self.sales_exec = make_staff('Sales Exec', 'Sales')
+        self.marketer = make_staff('Digital Marketing', 'Marketing')
+
+    def test_hr_opens_any_overview(self):
+        login(self.client, self.hr)
+        for person in (self.sales_exec, self.marketer, self.hr):
+            url = reverse('overview', args=[person.id])
+            self.assertEqual(self.client.get(url).status_code, 200, person.id)
+
+    def test_hr_still_cannot_export_overview(self):
+        login(self.client, self.hr)
+        url = reverse('staff_export', args=[self.sales_exec.id])
+        self.assertEqual(self.client.get(url).status_code, 403)

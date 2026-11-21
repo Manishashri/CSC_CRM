@@ -562,3 +562,23 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .pw-rules li.met { color: #16a34a; }
 .pw-rules li.met::before { content: "\2713"; color: #22c55e; }
+/* ===================== PASSWORD EYE BUTTON ===================== */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear { display: none; }
+
+.input-wrapper .pw-eye {
+    position: absolute; right: 40px; top: 50%; transform: translateY(-50%);
+    width: 28px; height: 28px; padding: 0; border: 0; background: transparent;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: #8b8da3; z-index: 3; pointer-events: auto;
+}
+.input-wrapper .pw-eye:hover { color: var(--csc-indigo); }
+
+/* undo the lock-icon rule (.input-wrapper i) on the eye's own icon */
+.input-wrapper .pw-eye i {
+    position: static; transform: none; right: auto; top: auto;
+    pointer-events: none; font-size: 14px; color: inherit;
+}
+
+.form-group .input-wrapper input[name="password"],
+.form-group .input-wrapper input[name="confirm_password"] { padding-right: 76px; }

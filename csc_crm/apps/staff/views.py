@@ -896,32 +896,54 @@ def export_staff(request):
 
     return response
 
+
+# Team leads and the department each one may view
+LEAD_VIEW_DEPARTMENTS = {
+    'Sales Exec Lead': 'Sales',
+    'Marketing Lead': 'Marketing',
+}
+
+
+def _lead_can_view(my_staff, staff):
+    """True if my_staff is a team lead and `staff` is themselves or in their department."""
+    dept = LEAD_VIEW_DEPARTMENTS.get(my_staff.role.role_name)
+    if not dept:
+        return False
+    return staff.id == my_staff.id or bool(
+        staff.department and staff.department.dept_name == dept
+    )
+
 # ===================================== STAFF OVERVIEW =========================
 
 @login_required(login_url='staff_login')
 def overview(request, staff_id=None):
 
     my_staff = request.user.staff_profile
+    my_role = my_staff.role.role_name
+    is_team_lead = my_role in LEAD_VIEW_DEPARTMENTS
 
-    # Only Admin and Manager can access Overview
-    if my_staff.role.role_name not in ['Admin', 'Manager']:
+    # Admin / Manager: any staff.
+    # Sales Exec Lead / Marketing Lead: their own department (same people as
+    # their Staff Management list) plus their own overview.
+        # Admin / Manager / HR: any staff.
+    if my_role not in ['Admin', 'Manager', 'HR'] and not is_team_lead:
         raise PermissionDenied
 
     # === STAFF ===
     if staff_id:
         staff = get_object_or_404(Staff, id=staff_id)
+    elif is_team_lead:
+        staff = my_staff            # never fall back to another department
     else:
         staff = Staff.objects.filter(status="active").first()
 
-    my_staff = request.user.staff_profile
-
-    if staff_id and my_staff.role.role_name not in ["Admin", "Manager"]:
-        if staff.id != my_staff.id:
-            raise PermissionDenied
+    if is_team_lead and staff and not _lead_can_view(my_staff, staff):
+        raise PermissionDenied
 
     if not staff:
         return render(request, "staff/overview.html", {
             "error": "No active staff found."
+
         })
 
     # local date (not UTC) so the month changes at midnight IST
@@ -1232,6 +1254,14 @@ def auto_checkout_pending_attendance():
 
         attendance.save()
 
+def _can_view_staff_attendance(my_staff, staff):
+    """Admin / Manager / HR: anyone. Sales Exec Lead / Marketing Lead: their
+    own department. Everyone else: only their own record."""
+    role = my_staff.role.role_name
+    if role in ["Admin", "Manager", "HR"] or staff.id == my_staff.id:
+        return True
+    return _lead_can_view(my_staff, staff)
+
 #======attendance=========
 @login_required(login_url='staff_login')
 def attendance_page(request, id):
@@ -1245,8 +1275,7 @@ def attendance_page(request, id):
     if (
         my_staff
         and my_staff.role
-        and my_staff.role.role_name not in ["Admin", "Manager", "HR"]
-        and staff.id != my_staff.id
+        and not _can_view_staff_attendance(my_staff, staff)
     ):
         raise PermissionDenied
     
@@ -1382,12 +1411,10 @@ def export_attendance(request, id):
     if (
         not my_staff
         or not my_staff.role
-        or (
-            my_staff.role.role_name not in ["Admin", "Manager", "HR"]
-            and staff.id != my_staff.id
-        )
+        or not _can_view_staff_attendance(my_staff, staff)
     ):
         raise PermissionDenied
+        
 
     attendance_data = Attendance.objects.filter(staff=staff)
 
@@ -3003,10 +3030,11 @@ def _humanize_when(moment, now):
     if diff.days == 1:
         return 'Yesterday'
     if diff.days < 7:
-        return f"{diff.days} Days Ago"
+        return f"{diff.days} days ago"
     if diff.days < 30:
         weeks = diff.days // 7
-        return f"{weeks} Week{'s' if weeks > 1 else ''} Ago"
+        return f"{weeks} week{'s' if weeks > 1 else ''} ago"
+        
     return timezone.localtime(moment).strftime('%d %b %Y')
 
 

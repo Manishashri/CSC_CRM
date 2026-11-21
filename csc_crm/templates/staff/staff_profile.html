@@ -189,11 +189,11 @@
   </div>
 
   <!--================================== Recent Activity ===================================-->
-
   <div class="sp-section">
-    <div class="sp-sec-head">
-      <i class="fa fa-clock-rotate-left"></i> Recent Activity
-    </div>
+  <div class="sp-sec-head">
+  <i class="fa fa-clock-rotate-left"></i> Recent Activity
+  <a href="{% url 'staff_activity_history' staff.id %}" class="sp-view-all-link">View All Activity</a>
+</div>
     <div class="sp-activity-list">
       {% for item in activity_feed %}
       <div class="sp-activity-item sp-act-{{ item.color }}">
@@ -207,11 +207,6 @@
       {% empty %}
       <div class="sp-empty"><i class="fa fa-clock" style="margin-right:6px;color:#d1d5db;"></i>No recent activity found.</div>
       {% endfor %}
-    </div>
-    <div class="sp-act-footer">
-      <a href="{% url 'staff_activity_history' staff.id %}" class="sp-act-history-btn">
-        <i class="fa fa-clock-rotate-left"></i> View Recent Activity History
-      </a>
     </div>
   </div>
 

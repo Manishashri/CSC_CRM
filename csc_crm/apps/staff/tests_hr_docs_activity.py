@@ -290,7 +290,7 @@ class RecentActivityTests(TestCase):
         feed = resp.context['activity_feed']
         self.assertGreaterEqual(len(feed), 4)
         html = resp.content.decode()
-        self.assertIn('View Recent Activity History', html)
+        self.assertIn('View All Activity', html)
         self.assertIn(reverse('staff_activity_history', args=[self.staff.id]), html)
 
     def test_card_is_capped_but_history_has_everything(self):
